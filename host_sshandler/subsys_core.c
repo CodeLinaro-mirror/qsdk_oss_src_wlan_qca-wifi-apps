@@ -11,6 +11,7 @@
 #include <time.h>
 #include <limits.h>
 #include "subsys_core.h"
+volatile sig_atomic_t t_stop_flag = 0;
 
 static uint64_t get_monotonic_ns(void)
 {

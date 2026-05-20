@@ -44,9 +44,9 @@ struct ath12k_crit_ring {
 } __attribute__((packed));
 
 struct ath12k_crit_record {
-	uint16_t radio_id;
-	uint32_t trigger;
 	uint64_t ts_nsec;
+	uint32_t trigger;
+	uint16_t radio_id;
 } __attribute__((packed));
 
 struct crit_action_map {
@@ -88,5 +88,8 @@ void subsys_uio_drain_crit_ring(struct subsys_ctx *ctx);
 void subsys_update_action_windows(struct subsys_ctx *ctx);
 void subsys_handle_crit_record(struct subsys_ctx *ctx, const struct ath12k_crit_record *rec);
 void *subsys_critical_buffer_monitor_thread(void *arg);
+
+void host_subsys_init_ctx(struct subsys_ctx *ctx);
+void host_start_window_thread(struct subsys_ctx *ctx);
 
 #endif /* SUBSYS_CORE_H */

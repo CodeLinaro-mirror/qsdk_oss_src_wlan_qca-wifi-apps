@@ -11,6 +11,7 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <dirent.h>
+#include <pthread.h>
 #include "subsys_core.h"
 
 #define ATH12K_DEBUGFS_ROOT "/sys/kernel/debug/ath12k"
@@ -222,5 +223,31 @@ void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * 
 		break;
 	default:
 		break;
+	}
+}
+
+static pthread_t host_window_thread;
+
+static void *host_window_thread_fn(void *arg)
+{
+	struct subsys_ctx *ctx = (struct subsys_ctx *)arg;
+
+	while (1) {
+		subsys_update_action_windows(ctx);
+
+		/* Sleep ~1s between checks */
+		struct timespec ts = { .tv_sec = 1, .tv_nsec = 0 };
+
+		nanosleep(&ts, NULL);
+	}
+
+	return NULL;
+}
+
+void host_start_window_thread(struct subsys_ctx *ctx)
+{
+	if (pthread_create(&host_window_thread, NULL,
+			   host_window_thread_fn, ctx) != 0) {
+		fprintf(stderr, "host-sshandler: failed to start window thread\n");
 	}
 }

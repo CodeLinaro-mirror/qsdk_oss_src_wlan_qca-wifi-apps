@@ -11,7 +11,9 @@
 #include <sys/sysinfo.h>
 #include "da_interface.h"
 #include "subsys_core.h"
+#include <signal.h>
 
+static struct subsys_ctx host_ctx;
 void lib_init(TelemetryServiceAPPCallbacks *callbacks);
 static TelemetryServiceAPPCallbacks *local_callbacks;
 
@@ -81,6 +83,7 @@ void service_interrupt_from_telemetry_uio_driver(struct uio_interrupt_data *intr
 				(unsigned long long)rec->ts_nsec,
 				rec->trigger,
 				rec->radio_id);
+		subsys_handle_crit_record(&host_ctx, rec);
 	} else {
 		fprintf(stderr, "host-sshandler : unexpected read_size=%u\n",
 				read_size);
@@ -130,5 +133,9 @@ void lib_init(TelemetryServiceAPPCallbacks *callbacks)
 	}
 
 	local_callbacks = callbacks;
+
+	/* Initialize subsys context and start window monitoring thread */
+	host_subsys_init_ctx(&host_ctx);
+	host_start_window_thread(&host_ctx);
 	ss_handler_uio_devices_maps_callback();
 }
