@@ -14,5 +14,7 @@
 
 #define PAYLOAD_SIZE  1020
 #define HOST_UIO_ID   1
+#define MAX_CMD_LEN   512
 
+void da_interface_host_create_snapshot(const char *event_name);
 #endif /* HOST_SUBSYSTEMHANDLER_H */

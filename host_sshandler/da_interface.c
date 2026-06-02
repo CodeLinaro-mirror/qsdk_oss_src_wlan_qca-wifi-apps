@@ -17,6 +17,53 @@ static struct subsys_ctx host_ctx;
 void lib_init(TelemetryServiceAPPCallbacks *callbacks);
 static TelemetryServiceAPPCallbacks *local_callbacks;
 
+void da_interface_host_create_snapshot(const char *event_name)
+{
+	SNAPSHOT_FILES files[] = { SNAPSHOT_FILE_HOST_LOGS };
+
+	if (!local_callbacks || !local_callbacks->create_snapshot) {
+		fprintf(stderr,
+			"host-sshandler: create_snapshot callback not available\n");
+		return;
+	}
+
+	int ret = local_callbacks->create_snapshot(files, 1, (char *)event_name,
+			true,
+			SUBSYSTEM_HANDLER_HOST_SUBSYSTEM_HANDLER);
+
+	if (ret == 0) {
+		fprintf(stdout,
+			"host-sshandler: [INFO] snapshot triggered successfully for event '%s'\n",
+			event_name ? event_name : "unknown");
+		fprintf(stdout,
+			"host-sshandler: [INFO] snapshot will be uploaded to cloud\n");
+	} else {
+		fprintf(stderr,
+			"host-sshandler: [ERROR] failed to trigger snapshot for event '%s' (ret=%d)\n",
+			event_name ? event_name : "unknown", ret);
+	}
+}
+
+void handle_subsystem_notification(subsystem_notification_msg *notification)
+{
+	char cmd[MAX_CMD_LEN];
+
+	if (!notification)
+		return;
+
+	if (notification->msg_type != SUBSYSTEM_NOTIFICATION_SNAPSHOT_COMPLETE)
+		return;
+
+	fprintf(stdout, "host-sshandler: snapshot complete, removing staging file %s\n",
+			HOST_LOGS_FILE_PATH);
+
+	snprintf(cmd, sizeof(cmd), "rm -f %s", HOST_LOGS_FILE_PATH);
+	if (system(cmd) != 0)
+		fprintf(stderr,
+			"host-sshandler: failed to remove staging file %s\n",
+			HOST_LOGS_FILE_PATH);
+}
+
 /* service_interrupt_from_telemetry_uio_driver :
  * Debug Agent specific callback that handles UIO interrupt notification.
  * Invoked when UIO interrupt is received from Kernel.
