@@ -15,6 +15,8 @@
 #include "subsys_core.h"
 #include "da_interface.h"
 
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
+
 #define ATH12K_DEBUGFS_ROOT "/sys/kernel/debug/ath12k"
 #define ATH12K_ATH_DEBUG_DIR "ath_debug"
 #define ATH12K_DBGMASK_FILE "dbgmask"
@@ -234,7 +236,7 @@ static int ath12k_get_minidump_path(char *path_buf)
 	return ret;
 }
 
-static void trigger_minidump(void)
+static bool trigger_minidump(void)
 {
 	char minidump_path[MAX_PATH_LEN];
 	FILE *fp;
@@ -243,14 +245,14 @@ static void trigger_minidump(void)
 	ret = ath12k_get_minidump_path(minidump_path);
 	if (ret < 0) {
 		fprintf(stderr, "host-sshandler: Cannot find minidump path\n");
-		return;
+		return false;
 	}
 
 	fp = fopen(minidump_path, "w");
 	if (!fp) {
 		fprintf(stderr, "host-sshandler: Cannot open minidump trigger %s: %s\n",
 			minidump_path, strerror(errno));
-		return;
+		return false;
 	}
 
 	if (fprintf(fp, "1\n") < 0)
@@ -261,6 +263,7 @@ static void trigger_minidump(void)
 			minidump_path);
 
 	fclose(fp);
+	return true;
 }
 
 static bool ath12k_snapshot_is_enabled(void)
@@ -303,50 +306,97 @@ static bool ath12k_snapshot_is_enabled(void)
 	return enabled;
 }
 
-static void create_host_snapshot(const char *event_name)
+
+static bool subsys_snap_collect_minidump(void)
+{
+	char cmd[MAX_CMD_LEN];
+	struct timespec ts = { .tv_sec = 1, .tv_nsec = 500000000 };
+
+	if(!trigger_minidump())
+		return false;
+
+	nanosleep(&ts, NULL);
+	snprintf(cmd, sizeof(cmd), "mv %s %s/ 2>/dev/null", MINIDUMP_DIR, HOST_DEBUG_DIR);
+	if (system(cmd) != 0) {
+		fprintf(stderr, "host-sshandler: minidump staging failed, MINIDUMP_DIR not found\n");
+		return false;
+	}
+
+	return true;
+}
+
+static bool subsys_snap_collect_logread(void)
 {
 	char cmd[MAX_CMD_LEN];
 
-	/* Proceed only if snapshot collection is enabled via debugfs */
+	snprintf(cmd, sizeof(cmd), "%s > %s/logread.txt 2>&1", LOGREAD_CMD, HOST_DEBUG_DIR);
+	if (system(cmd) != 0) {
+		fprintf(stderr, "host-sshandler: logread failed\n");
+		return false;
+	}
+
+	return true;
+}
+
+struct snap_subcategory {
+	const char *key;
+	bool (*collect)(void);
+};
+
+static const struct snap_subcategory snap_subcategory_map[] = {
+	{ SS_SNAP_KEY_MINIDUMP, subsys_snap_collect_minidump },
+	{ SS_SNAP_KEY_LOGREAD,  subsys_snap_collect_logread  },
+};
+
+static void create_host_snapshot(const char *event_name, char * const *snap_context)
+{
+	char cmd[MAX_CMD_LEN];
+	int i, j, collected = 0;
+
 	if (!ath12k_snapshot_is_enabled()) {
 		fprintf(stdout, "host-sshandler: snapshot not enabled, skipping\n");
 		return;
 	}
 
-	trigger_minidump();
+	if (!snap_context || !snap_context[0]) {
+		fprintf(stderr, "host-sshandler: SS_ACTION_SNAPSHOT: no subcategories specified, skipping snapshot\n");
+		return;
+	}
 
-	/* Wait 1500ms for minidump collection to complete */
-	struct timespec ts = { .tv_sec = 1, .tv_nsec = 500000000 };
-
-	nanosleep(&ts, NULL);
-
-	/* 1. Create staging dir */
 	snprintf(cmd, sizeof(cmd), "mkdir -p %s", HOST_DEBUG_DIR);
 	system(cmd);
 
-	/* 2. Collect logread into staging dir */
-	snprintf(cmd, sizeof(cmd), "%s > %s/logread.txt 2>&1",
-		 LOGREAD_CMD, HOST_DEBUG_DIR);
-	if (system(cmd) != 0)
-		fprintf(stderr, "host-sshandler: logread failed\n");
+	for (i = 0; i < SSH_MAX_CTX_STRINGS && snap_context[i]; i++) {
+		bool matched = false;
 
-	/* 3. Move minidump into staging dir */
-	snprintf(cmd, sizeof(cmd), "mv %s %s/ 2>/dev/null",
-		 MINIDUMP_DIR, HOST_DEBUG_DIR);
-	system(cmd);
+		for (j = 0; j < ARRAY_SIZE(snap_subcategory_map); j++) {
+			if (strcmp(snap_context[i], snap_subcategory_map[j].key) == 0) {
+				if (snap_subcategory_map[j].collect())
+					collected++;
+				matched = true;
+				break;
+			}
+		}
 
-	/* 4. Create tar at fixed well-known path */
+		if (!matched)
+			fprintf(stderr, "host-sshandler: unknown snapshot subcategory / collection failure '%s', skipping\n",
+				snap_context[i]);
+	}
+
+	if (!collected) {
+		fprintf(stderr, "host-sshandler: no subcategories collected, skipping tar\n");
+		goto cleanup;
+	}
+
 	snprintf(cmd, sizeof(cmd), "tar -czf %s -C %s host_debug_logs 2>&1",
 		 HOST_LOGS_FILE_PATH, TEMP_DIR);
 	if (system(cmd) != 0) {
 		fprintf(stderr, "host-sshandler: Failed to create diag tar\n");
 		goto cleanup;
 	}
-	fprintf(stdout,
-		"host-sshandler: Host debug snapshot tar created -> %s\n",
+	fprintf(stdout, "host-sshandler: Host debug snapshot tar created -> %s\n",
 		HOST_LOGS_FILE_PATH);
 
-	/* 5. Hand off to DA */
 	da_interface_host_create_snapshot(event_name);
 
 cleanup:
@@ -366,11 +416,11 @@ void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
 		enable_hapd_verbose_logs(radio_id);
 		break;
 	case SS_ACTION_SNAPSHOT:
-		 create_host_snapshot(ath12k_crit_type_str(trigger));
+		create_host_snapshot(ath12k_crit_type_str(trigger), action_context);
 		break;
 	default:
 		break;
-}
+	}
 }
 
 void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * const * action_context)

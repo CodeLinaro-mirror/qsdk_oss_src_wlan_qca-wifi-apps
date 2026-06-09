@@ -14,16 +14,16 @@ static const struct crit_action_map subsys_default_map[] = {
 	{
 		ATH12K_CRIT_VAP_BRINGUP,
 		SSH_ACTION_POLICY_STOP_ON_REPRODUCE,
-		3,
+		2,
 		{SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT},
-		{ {"wmi", "mac", "peer"}, {} }
+		{ {"wmi", "mac", "peer"}, {"minidump", "logread"} }
 	},
 	{
 		ATH12K_CRIT_CONNECTION_FAIL,
 		SSH_ACTION_POLICY_STOP_ON_REPRODUCE,
-		3,
+		2,
 		{SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT},
-		{ {"peer"}, {} }
+		{ {"peer"}, {"minidump", "logread"} }
 	}
 };
 

@@ -14,7 +14,8 @@
 
 #define SSH_MAX_ACTIONS_PER_ENUM 4
 #define SSH_MAX_CTX_STRINGS 8
-
+#define SS_SNAP_KEY_MINIDUMP  "minidump"
+#define SS_SNAP_KEY_LOGREAD   "logread"
 extern volatile sig_atomic_t t_stop_flag;
 
 enum subsys_action_id {
