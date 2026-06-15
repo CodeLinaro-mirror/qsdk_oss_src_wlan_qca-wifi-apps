@@ -11,6 +11,19 @@
 #include <time.h>
 #include <limits.h>
 #include "subsys_core.h"
+volatile sig_atomic_t t_stop_flag = 0;
+
+const char *ath12k_crit_type_str(enum ath12k_crit_err_type t)
+{
+	switch (t) {
+	case ATH12K_CRIT_VAP_BRINGUP:
+		return "vap_bringup";
+	case ATH12K_CRIT_CONNECTION_FAIL:
+		return "connection_fail";
+	default:
+		return "host_unknown";
+	}
+}
 
 static uint64_t get_monotonic_ns(void)
 {
@@ -59,7 +72,9 @@ static void subsys_start_and_update_trigger_window(struct subsys_ctx *ctx,
 		trig_state->trigger_count = 1;
 
 		for (uint32_t i = 0; i < map->num_actions; i++) {
-			subsys_action_start(map->actions[i], rec->radio_id, map->action_context[i]);
+			subsys_action_start(map->actions[i], rec->radio_id,
+					    map->action_context[i],
+					    rec->trigger);
 		}
 		return;
 	}

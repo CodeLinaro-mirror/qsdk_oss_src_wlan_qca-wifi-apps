@@ -1,21 +1,25 @@
-CC = gcc
-CFLAGS = -Wall -Werror -g -I.
-LDFLAGS = -lpthread
+CC ?= gcc
+CFLAGS += -Wall -Werror -g -I. -fPIC
+LDFLAGS += -lpthread -shared
 
-TARGET = host_sshandler
+TARGET = libhost_subsystem_handler.so
 
-SRCS = main.c utils.c uio.c actions.c subsys_core.c
+DESTDIR ?=
+LIBDIR = $(DESTDIR)/usr/lib
+
+SRCS = utils.c uio.c actions.c subsys_core.c da_interface.c
 OBJS = $(SRCS:.c=.o)
 
-.PHONY: all clean
+.PHONY: all install clean
 
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
 	$(CC) $(OBJS) -o $(TARGET) $(LDFLAGS)
 
-%.o: %.c subsys_core.h
-	$(CC) $(CFLAGS) -c $< -o $@
+install: all
+	install -d $(LIBDIR)
+	install -m 0755 $(TARGET) $(LIBDIR)/$(TARGET)
 
 clean:
 	rm -f $(TARGET) $(OBJS)

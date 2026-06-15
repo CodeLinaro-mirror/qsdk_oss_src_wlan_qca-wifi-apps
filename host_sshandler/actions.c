@@ -1,7 +1,6 @@
-/*
-* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
-* SPDX-License-Identifier: ISC
-*/
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: ISC
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +11,9 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <dirent.h>
+#include <pthread.h>
 #include "subsys_core.h"
+#include "da_interface.h"
 
 #define ATH12K_DEBUGFS_ROOT "/sys/kernel/debug/ath12k"
 #define ATH12K_ATH_DEBUG_DIR "ath_debug"
@@ -20,6 +21,13 @@
 #define DBGMASK_PREFIX "Current: "
 #define MAX_PATH_LEN 512
 #define MAX_MASK_BUF_LEN 512
+#define ATH12K_MINIDUMP_DIR_NAME "minidump"
+#define ATH12K_MINIDUMP_COLLECT "collect"
+#define TEMP_DIR "/tmp"
+#define LOGREAD_CMD          "logread"
+#define MINIDUMP_DIR    TEMP_DIR "/minidump"
+#define HOST_DEBUG_DIR  TEMP_DIR "/host_debug_logs"
+#define ATH12K_SNAPSHOT_FILE  "snapshot"
 
 static int ath12k_get_dbgmask_path(char *path_buf, size_t buf_size)
 {
@@ -194,7 +202,161 @@ static void disable_hapd_verbose_logs(uint16_t radio_id)
 	fprintf(stderr, "action: disable_hapd_verbose_logs (radio=%u)\n", radio_id);
 }
 
-void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id, char * const * action_context)
+static int ath12k_get_minidump_path(char *path_buf)
+{
+	DIR *dir;
+	struct dirent *entry;
+	int ret = -ENOENT;
+
+	dir = opendir(ATH12K_DEBUGFS_ROOT);
+	if (!dir) {
+		fprintf(stderr, "host-sshandler: Failed to open %s: %s\n",
+			ATH12K_DEBUGFS_ROOT, strerror(errno));
+		return -errno;
+	}
+
+	while ((entry = readdir(dir)) != NULL) {
+		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+			continue;
+
+		snprintf(path_buf, MAX_PATH_LEN, "%s/%s/%s/%s/%s",
+			 ATH12K_DEBUGFS_ROOT, entry->d_name,
+			 ATH12K_ATH_DEBUG_DIR, ATH12K_MINIDUMP_DIR_NAME,
+			 ATH12K_MINIDUMP_COLLECT);
+
+		if (access(path_buf, F_OK) == 0) {
+			ret = 0;
+			break;
+		}
+	}
+
+	closedir(dir);
+	return ret;
+}
+
+static void trigger_minidump(void)
+{
+	char minidump_path[MAX_PATH_LEN];
+	FILE *fp;
+	int ret;
+
+	ret = ath12k_get_minidump_path(minidump_path);
+	if (ret < 0) {
+		fprintf(stderr, "host-sshandler: Cannot find minidump path\n");
+		return;
+	}
+
+	fp = fopen(minidump_path, "w");
+	if (!fp) {
+		fprintf(stderr, "host-sshandler: Cannot open minidump trigger %s: %s\n",
+			minidump_path, strerror(errno));
+		return;
+	}
+
+	if (fprintf(fp, "1\n") < 0)
+		fprintf(stderr, "host-sshandler: Failed to write minidump trigger: %s\n",
+			strerror(errno));
+	else
+		fprintf(stdout, "host-sshandler: Minidump triggered via %s\n",
+			minidump_path);
+
+	fclose(fp);
+}
+
+static bool ath12k_snapshot_is_enabled(void)
+{
+	char path[MAX_PATH_LEN];
+	char buf[8] = {0};
+	DIR *dir;
+	struct dirent *entry;
+	FILE *fp;
+	bool enabled = false;
+
+	dir = opendir(ATH12K_DEBUGFS_ROOT);
+	if (!dir)
+		return false;
+
+	while ((entry = readdir(dir)) != NULL) {
+		if (strcmp(entry->d_name, ".") == 0 ||
+		    strcmp(entry->d_name, "..") == 0)
+			continue;
+
+		snprintf(path, sizeof(path), "%s/%s/%s/%s",
+			 ATH12K_DEBUGFS_ROOT, entry->d_name,
+			 ATH12K_ATH_DEBUG_DIR, ATH12K_SNAPSHOT_FILE);
+
+		if (access(path, F_OK) != 0)
+			continue;
+
+		fp = fopen(path, "r");
+		if (!fp)
+			break;
+
+		if (fgets(buf, sizeof(buf), fp) && buf[0] == '1')
+			enabled = true;
+
+		fclose(fp);
+		break;
+	}
+
+	closedir(dir);
+	return enabled;
+}
+
+static void create_host_snapshot(const char *event_name)
+{
+	char cmd[MAX_CMD_LEN];
+
+	/* Proceed only if snapshot collection is enabled via debugfs */
+	if (!ath12k_snapshot_is_enabled()) {
+		fprintf(stdout, "host-sshandler: snapshot not enabled, skipping\n");
+		return;
+	}
+
+	trigger_minidump();
+
+	/* Wait 1500ms for minidump collection to complete */
+	struct timespec ts = { .tv_sec = 1, .tv_nsec = 500000000 };
+
+	nanosleep(&ts, NULL);
+
+	/* 1. Create staging dir */
+	snprintf(cmd, sizeof(cmd), "mkdir -p %s", HOST_DEBUG_DIR);
+	system(cmd);
+
+	/* 2. Collect logread into staging dir */
+	snprintf(cmd, sizeof(cmd), "%s > %s/logread.txt 2>&1",
+		 LOGREAD_CMD, HOST_DEBUG_DIR);
+	if (system(cmd) != 0)
+		fprintf(stderr, "host-sshandler: logread failed\n");
+
+	/* 3. Move minidump into staging dir */
+	snprintf(cmd, sizeof(cmd), "mv %s %s/ 2>/dev/null",
+		 MINIDUMP_DIR, HOST_DEBUG_DIR);
+	system(cmd);
+
+	/* 4. Create tar at fixed well-known path */
+	snprintf(cmd, sizeof(cmd), "tar -czf %s -C %s host_debug_logs 2>&1",
+		 HOST_LOGS_FILE_PATH, TEMP_DIR);
+	if (system(cmd) != 0) {
+		fprintf(stderr, "host-sshandler: Failed to create diag tar\n");
+		goto cleanup;
+	}
+	fprintf(stdout,
+		"host-sshandler: Host debug snapshot tar created -> %s\n",
+		HOST_LOGS_FILE_PATH);
+
+	/* 5. Hand off to DA */
+	da_interface_host_create_snapshot(event_name);
+
+cleanup:
+	snprintf(cmd, sizeof(cmd), "rm -rf %s", HOST_DEBUG_DIR);
+	system(cmd);
+}
+
+void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
+			 char * const *action_context,
+			 enum ath12k_crit_err_type trigger)
 {
 	switch (act_id) {
 	case SS_ACTION_ENABLE_DBG_LOGS:
@@ -202,6 +364,9 @@ void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id, char *
 		break;
 	case SS_ACTION_INC_HAPD_VERBOSITY:
 		enable_hapd_verbose_logs(radio_id);
+		break;
+	case SS_ACTION_SNAPSHOT:
+		 create_host_snapshot(ath12k_crit_type_str(trigger));
 		break;
 	default:
 		break;
@@ -223,5 +388,31 @@ void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * 
 		break;
 	default:
 		break;
+	}
+}
+
+static pthread_t host_window_thread;
+
+static void *host_window_thread_fn(void *arg)
+{
+	struct subsys_ctx *ctx = (struct subsys_ctx *)arg;
+
+	while (1) {
+		subsys_update_action_windows(ctx);
+
+		/* Sleep ~1s between checks */
+		struct timespec ts = { .tv_sec = 1, .tv_nsec = 0 };
+
+		nanosleep(&ts, NULL);
+	}
+
+	return NULL;
+}
+
+void host_start_window_thread(struct subsys_ctx *ctx)
+{
+	if (pthread_create(&host_window_thread, NULL,
+			   host_window_thread_fn, ctx) != 0) {
+		fprintf(stderr, "host-sshandler: failed to start window thread\n");
 	}
 }

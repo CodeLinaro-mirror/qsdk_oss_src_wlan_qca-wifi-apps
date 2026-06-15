@@ -20,6 +20,7 @@ extern volatile sig_atomic_t t_stop_flag;
 enum subsys_action_id {
 	SS_ACTION_ENABLE_DBG_LOGS = 0,
 	SS_ACTION_INC_HAPD_VERBOSITY,
+	SS_ACTION_SNAPSHOT,
 	SS_ACTION_MAX
 };
 
@@ -44,9 +45,9 @@ struct ath12k_crit_ring {
 } __attribute__((packed));
 
 struct ath12k_crit_record {
-	uint16_t radio_id;
-	uint32_t trigger;
 	uint64_t ts_nsec;
+	uint32_t trigger;
+	uint16_t radio_id;
 } __attribute__((packed));
 
 struct crit_action_map {
@@ -78,15 +79,21 @@ struct subsys_ctx {
 	struct subsys_trigger_state trigger_state[ATH12K_CRIT_MAX];
 };
 
+const char *ath12k_crit_type_str(enum ath12k_crit_err_type t);
 void subsys_config_init_defaults(struct subsys_config *cfg);
 const struct crit_action_map *find_map_for_enum(const struct subsys_config *cfg, enum ath12k_crit_err_type crit_err_enum);
 int subsys_find_uio_dev(const char *wanted_name);
 long subsys_uio_read_map_size(int uio_index);
-void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id, char * const* action_context);
+void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
+			 char * const *action_context,
+			 enum ath12k_crit_err_type trigger);
 void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * const* action_context);
 void subsys_uio_drain_crit_ring(struct subsys_ctx *ctx);
 void subsys_update_action_windows(struct subsys_ctx *ctx);
 void subsys_handle_crit_record(struct subsys_ctx *ctx, const struct ath12k_crit_record *rec);
 void *subsys_critical_buffer_monitor_thread(void *arg);
+
+void host_subsys_init_ctx(struct subsys_ctx *ctx);
+void host_start_window_thread(struct subsys_ctx *ctx);
 
 #endif /* SUBSYS_CORE_H */
