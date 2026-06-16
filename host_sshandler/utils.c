@@ -24,7 +24,21 @@ static const struct crit_action_map subsys_default_map[] = {
 		2,
 		{SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT},
 		{ {"peer"}, {"minidump", "logread"} }
-	}
+	},
+	{
+		ATH12K_FW_LOAD_FAILURE,
+		SSH_ACTION_POLICY_STOP_ON_REPRODUCE,
+		2,
+		{SS_ACTION_ENABLE_DBG_LOGS_ON_BOOT, SS_ACTION_SNAPSHOT},
+		{ {"ahb", "boot", "qmi"}, {"minidump"} }
+	},
+	{
+		ATH12K_BDF_LOAD_FAILURE,
+		SSH_ACTION_POLICY_STOP_ON_REPRODUCE,
+		2,
+		{SS_ACTION_ENABLE_DBG_LOGS_ON_BOOT, SS_ACTION_SNAPSHOT},
+		{ {"boot", "qmi"}, {"minidump"} }
+	},
 };
 
 void subsys_config_init_defaults(struct subsys_config *cfg)
