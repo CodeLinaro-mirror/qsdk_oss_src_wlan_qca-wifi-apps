@@ -20,6 +20,12 @@ const char *ath12k_crit_type_str(enum ath12k_crit_err_type t)
 		return "vap_bringup";
 	case ATH12K_CRIT_CONNECTION_FAIL:
 		return "connection_fail";
+	case ATH12K_CRIT_PEER_FAILURE:
+		return "peer_failure";
+	case ATH12K_FW_LOAD_FAILURE:
+		return "fw_load_failure";
+	case ATH12K_BDF_LOAD_FAILURE:
+		return "bdf_load_failure";
 	default:
 		return "host_unknown";
 	}
@@ -76,6 +82,7 @@ static void subsys_start_and_update_trigger_window(struct subsys_ctx *ctx,
 					    map->action_context[i],
 					    rec->trigger);
 		}
+		fprintf(stdout, "host-sshandler : Critical Error Actions triggered for  ath12k-crit-enum=%u.\n", rec->trigger);
 		return;
 	}
 
