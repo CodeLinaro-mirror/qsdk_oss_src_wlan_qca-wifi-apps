@@ -15,12 +15,19 @@
 #include "subsys_core.h"
 #include "da_interface.h"
 
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
+
 #define ATH12K_DEBUGFS_ROOT "/sys/kernel/debug/ath12k"
+#define ATH12K_BOOT_DBG_MASK_KEY "ath12k_debug_mask="
+#define FW_PRINTENV_CMD "fw_printenv bootargs"
+#define FW_SETENV_CMD_PREFIX "fw_setenv bootargs"
 #define ATH12K_ATH_DEBUG_DIR "ath_debug"
 #define ATH12K_DBGMASK_FILE "dbgmask"
 #define DBGMASK_PREFIX "Current: "
 #define MAX_PATH_LEN 512
 #define MAX_MASK_BUF_LEN 512
+#define FW_BOOTARGS_CMD_LEN 2048
+#define FW_BOOTARGS_BUF_LEN 512
 #define ATH12K_MINIDUMP_DIR_NAME "minidump"
 #define ATH12K_MINIDUMP_COLLECT "collect"
 #define TEMP_DIR "/tmp"
@@ -180,6 +187,163 @@ int ath12k_debug_set_mask_str(const char *mask_name, bool enable)
 	return ret;
 }
 
+static const struct {
+	const char *name;
+	uint64_t bit;
+} ath12k_dbg_mask_map[] = {
+	{ "ahb",      1ULL << 0  },
+	{ "wmi",      1ULL << 1  },
+	{ "htc",      1ULL << 2  },
+	{ "htt",      1ULL << 3  },
+	{ "mac",      1ULL << 4  },
+	{ "boot",     1ULL << 5  },
+	{ "qmi",      1ULL << 6  },
+	{ "data",     1ULL << 7  },
+	{ "mgmt",     1ULL << 8  },
+	{ "reg",      1ULL << 9  },
+	{ "testmode", 1ULL << 10 },
+	{ "hal",      1ULL << 11 },
+	{ "pci",      1ULL << 12 },
+	{ "dp_tx",    1ULL << 13 },
+	{ "dp_rx",    1ULL << 14 },
+	{ "wow",      1ULL << 15 },
+	{ "fst",      1ULL << 16 },
+	{ "peer",     1ULL << 17 },
+	{ "ini",      1ULL << 18 },
+	{ "qos",      1ULL << 19 },
+	{ "mlme",     1ULL << 29 },
+	{ "eapol",    1ULL << 30 },
+	{ "dp_mon",   1ULL << 32 },
+	{ "scan",     1ULL << 33 },
+	{ "assoc",    1ULL << 34 },
+	{ "roam",     1ULL << 35 },
+	{ "dfs",      1ULL << 36 },
+	{ "mlo",      1ULL << 40 },
+};
+
+static uint64_t subsys_action_compute_boot_dbgmask(char * const *action_context)
+{
+	uint64_t mask = 0;
+	int i, j;
+
+	for (i = 0; i < SSH_MAX_CTX_STRINGS && action_context[i]; i++) {
+		for (j = 0; j < (int)ARRAY_SIZE(ath12k_dbg_mask_map); j++) {
+			if (strcmp(action_context[i], ath12k_dbg_mask_map[j].name) == 0) {
+				mask |= ath12k_dbg_mask_map[j].bit;
+				break;
+			}
+		}
+		if (j == (int)ARRAY_SIZE(ath12k_dbg_mask_map))
+			fprintf(stderr, "host-sshandler: unknown boot dbg mask name '%s', skipping\n",
+				action_context[i]);
+	}
+	return mask;
+}
+
+static void subsys_action_set_boot_dbgmask(char * const *action_context)
+{
+	char buf[FW_BOOTARGS_BUF_LEN] = {0};
+	char cleaned[FW_BOOTARGS_BUF_LEN] = {0};
+	char cmd[FW_BOOTARGS_CMD_LEN];
+	char *bootargs_val;
+	char *mask_start;
+	uint64_t dbg_mask;
+	FILE *fp;
+
+	fp = popen(FW_PRINTENV_CMD, "r");
+	if (fp && fgets(buf, sizeof(buf), fp)) {
+		pclose(fp);
+	} else {
+		if (fp)
+			pclose(fp);
+		fprintf(stderr, "host-sshandler: failed to read bootargs via '%s'\n",
+			FW_PRINTENV_CMD);
+		return;
+	}
+
+	/* fw_printenv output: "bootargs=<value>\n" */
+	bootargs_val = strchr(buf, '=');
+	if (bootargs_val) {
+		bootargs_val++;
+	} else {
+		fprintf(stderr, "host-sshandler: unexpected fw_printenv output: %s\n", buf);
+		return;
+	}
+
+	bootargs_val[strcspn(bootargs_val, "\n")] = '\0';
+
+	mask_start = strstr(bootargs_val, ATH12K_BOOT_DBG_MASK_KEY);
+	if (mask_start) {
+		/* Mask present — issue reproduced after boot.
+		 * Compute residual = existing_mask & ~our_mask.
+		 * If zero: the mask was entirely ours — remove the token.
+		 * If non-zero: another tool set some bits — preserve them. */
+		char *before_end = mask_start;
+		size_t prefix_len;
+		char *after;
+		uint64_t existing_mask, our_mask, residual;
+
+		existing_mask = strtoull(mask_start + strlen(ATH12K_BOOT_DBG_MASK_KEY),
+					 NULL, 0);
+		our_mask = action_context ? subsys_action_compute_boot_dbgmask(action_context) : 0;
+		residual = existing_mask & ~our_mask;
+
+		if (before_end > bootargs_val && *(before_end - 1) == ' ')
+			before_end--;
+
+		prefix_len = before_end - bootargs_val;
+
+		after = mask_start + strlen(ATH12K_BOOT_DBG_MASK_KEY);
+		while (*after && *after != ' ')
+			after++;
+
+		if (residual) {
+			/* Partial: rewrite token with residual bits only */
+			char mask_tok[48];
+
+			snprintf(mask_tok, sizeof(mask_tok), "%s0x%llx",
+				 ATH12K_BOOT_DBG_MASK_KEY,
+				 (unsigned long long)residual);
+			snprintf(cleaned, sizeof(cleaned), "%.*s%s%s",
+				 (int)prefix_len, bootargs_val, mask_tok, after);
+			fprintf(stdout,
+				"host-sshandler: boot mask partially ours; preserving residual=0x%llx\n",
+				(unsigned long long)residual);
+		} else {
+			/* Fully ours: remove the token entirely */
+			snprintf(cleaned, sizeof(cleaned), "%.*s%s",
+				 (int)prefix_len, bootargs_val, after);
+			fprintf(stdout,
+				"host-sshandler: boot mask fully ours - removing (issue reproduced)\n");
+		}
+
+		snprintf(cmd, sizeof(cmd), "%s \"%s\"",
+			 FW_SETENV_CMD_PREFIX, cleaned);
+		fprintf(stdout, "host-sshandler: fw_setenv cmd: %s\n", cmd);
+		if (system(cmd) != 0)
+			fprintf(stderr, "host-sshandler: fw_setenv failed\n");
+		return;
+	}
+
+	/* Mask absent — first trigger; inject for next boot */
+	dbg_mask = action_context ? subsys_action_compute_boot_dbgmask(action_context) : 0;
+	if (!dbg_mask) {
+		fprintf(stderr,
+			"host-sshandler: no valid boot dbg mask names in action context\n");
+		return;
+	}
+
+	snprintf(cmd, sizeof(cmd), "%s \"%s ath12k_debug_mask=0x%llx\"",
+		 FW_SETENV_CMD_PREFIX, bootargs_val,
+		 (unsigned long long)dbg_mask);
+	fprintf(stdout,
+		"host-sshandler: setting boot dbg mask=0x%llx - reboot to capture. cmd: %s\n",
+		(unsigned long long)dbg_mask, cmd);
+	if (system(cmd) != 0)
+		fprintf(stderr, "host-sshandler: fw_setenv failed\n");
+}
+
+
 static void subsys_process_debug_masks(char * const * action_context, bool enable)
 {
 	int i = 0;
@@ -234,7 +398,7 @@ static int ath12k_get_minidump_path(char *path_buf)
 	return ret;
 }
 
-static void trigger_minidump(void)
+static bool trigger_minidump(void)
 {
 	char minidump_path[MAX_PATH_LEN];
 	FILE *fp;
@@ -243,14 +407,14 @@ static void trigger_minidump(void)
 	ret = ath12k_get_minidump_path(minidump_path);
 	if (ret < 0) {
 		fprintf(stderr, "host-sshandler: Cannot find minidump path\n");
-		return;
+		return false;
 	}
 
 	fp = fopen(minidump_path, "w");
 	if (!fp) {
 		fprintf(stderr, "host-sshandler: Cannot open minidump trigger %s: %s\n",
 			minidump_path, strerror(errno));
-		return;
+		return false;
 	}
 
 	if (fprintf(fp, "1\n") < 0)
@@ -261,6 +425,7 @@ static void trigger_minidump(void)
 			minidump_path);
 
 	fclose(fp);
+	return true;
 }
 
 static bool ath12k_snapshot_is_enabled(void)
@@ -303,50 +468,97 @@ static bool ath12k_snapshot_is_enabled(void)
 	return enabled;
 }
 
-static void create_host_snapshot(const char *event_name)
+
+static bool subsys_snap_collect_minidump(void)
+{
+	char cmd[MAX_CMD_LEN];
+	struct timespec ts = { .tv_sec = 1, .tv_nsec = 500000000 };
+
+	if(!trigger_minidump())
+		return false;
+
+	nanosleep(&ts, NULL);
+	snprintf(cmd, sizeof(cmd), "mv %s %s/ 2>/dev/null", MINIDUMP_DIR, HOST_DEBUG_DIR);
+	if (system(cmd) != 0) {
+		fprintf(stderr, "host-sshandler: minidump staging failed, MINIDUMP_DIR not found\n");
+		return false;
+	}
+
+	return true;
+}
+
+static bool subsys_snap_collect_logread(void)
 {
 	char cmd[MAX_CMD_LEN];
 
-	/* Proceed only if snapshot collection is enabled via debugfs */
+	snprintf(cmd, sizeof(cmd), "%s > %s/logread.txt 2>&1", LOGREAD_CMD, HOST_DEBUG_DIR);
+	if (system(cmd) != 0) {
+		fprintf(stderr, "host-sshandler: logread failed\n");
+		return false;
+	}
+
+	return true;
+}
+
+struct snap_subcategory {
+	const char *key;
+	bool (*collect)(void);
+};
+
+static const struct snap_subcategory snap_subcategory_map[] = {
+	{ SS_SNAP_KEY_MINIDUMP, subsys_snap_collect_minidump },
+	{ SS_SNAP_KEY_LOGREAD,  subsys_snap_collect_logread  },
+};
+
+static void create_host_snapshot(const char *event_name, char * const *snap_context)
+{
+	char cmd[MAX_CMD_LEN];
+	int i, j, collected = 0;
+
 	if (!ath12k_snapshot_is_enabled()) {
 		fprintf(stdout, "host-sshandler: snapshot not enabled, skipping\n");
 		return;
 	}
 
-	trigger_minidump();
+	if (!snap_context || !snap_context[0]) {
+		fprintf(stderr, "host-sshandler: SS_ACTION_SNAPSHOT: no subcategories specified, skipping snapshot\n");
+		return;
+	}
 
-	/* Wait 1500ms for minidump collection to complete */
-	struct timespec ts = { .tv_sec = 1, .tv_nsec = 500000000 };
-
-	nanosleep(&ts, NULL);
-
-	/* 1. Create staging dir */
 	snprintf(cmd, sizeof(cmd), "mkdir -p %s", HOST_DEBUG_DIR);
 	system(cmd);
 
-	/* 2. Collect logread into staging dir */
-	snprintf(cmd, sizeof(cmd), "%s > %s/logread.txt 2>&1",
-		 LOGREAD_CMD, HOST_DEBUG_DIR);
-	if (system(cmd) != 0)
-		fprintf(stderr, "host-sshandler: logread failed\n");
+	for (i = 0; i < SSH_MAX_CTX_STRINGS && snap_context[i]; i++) {
+		bool matched = false;
 
-	/* 3. Move minidump into staging dir */
-	snprintf(cmd, sizeof(cmd), "mv %s %s/ 2>/dev/null",
-		 MINIDUMP_DIR, HOST_DEBUG_DIR);
-	system(cmd);
+		for (j = 0; j < ARRAY_SIZE(snap_subcategory_map); j++) {
+			if (strcmp(snap_context[i], snap_subcategory_map[j].key) == 0) {
+				if (snap_subcategory_map[j].collect())
+					collected++;
+				matched = true;
+				break;
+			}
+		}
 
-	/* 4. Create tar at fixed well-known path */
+		if (!matched)
+			fprintf(stderr, "host-sshandler: unknown snapshot subcategory / collection failure '%s', skipping\n",
+				snap_context[i]);
+	}
+
+	if (!collected) {
+		fprintf(stderr, "host-sshandler: no subcategories collected, skipping tar\n");
+		goto cleanup;
+	}
+
 	snprintf(cmd, sizeof(cmd), "tar -czf %s -C %s host_debug_logs 2>&1",
 		 HOST_LOGS_FILE_PATH, TEMP_DIR);
 	if (system(cmd) != 0) {
 		fprintf(stderr, "host-sshandler: Failed to create diag tar\n");
 		goto cleanup;
 	}
-	fprintf(stdout,
-		"host-sshandler: Host debug snapshot tar created -> %s\n",
+	fprintf(stdout, "host-sshandler: Host debug snapshot tar created -> %s\n",
 		HOST_LOGS_FILE_PATH);
 
-	/* 5. Hand off to DA */
 	da_interface_host_create_snapshot(event_name);
 
 cleanup:
@@ -366,11 +578,14 @@ void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
 		enable_hapd_verbose_logs(radio_id);
 		break;
 	case SS_ACTION_SNAPSHOT:
-		 create_host_snapshot(ath12k_crit_type_str(trigger));
+		create_host_snapshot(ath12k_crit_type_str(trigger), action_context);
+		break;
+	case SS_ACTION_ENABLE_DBG_LOGS_ON_BOOT:
+		subsys_action_set_boot_dbgmask(action_context);
 		break;
 	default:
 		break;
-}
+	}
 }
 
 void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * const * action_context)

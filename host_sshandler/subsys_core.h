@@ -14,13 +14,15 @@
 
 #define SSH_MAX_ACTIONS_PER_ENUM 4
 #define SSH_MAX_CTX_STRINGS 8
-
+#define SS_SNAP_KEY_MINIDUMP  "minidump"
+#define SS_SNAP_KEY_LOGREAD   "logread"
 extern volatile sig_atomic_t t_stop_flag;
 
 enum subsys_action_id {
 	SS_ACTION_ENABLE_DBG_LOGS = 0,
 	SS_ACTION_INC_HAPD_VERBOSITY,
 	SS_ACTION_SNAPSHOT,
+	SS_ACTION_ENABLE_DBG_LOGS_ON_BOOT,
 	SS_ACTION_MAX
 };
 
@@ -31,7 +33,10 @@ enum subsys_action_policy {
 
 enum ath12k_crit_err_type {
 	ATH12K_CRIT_VAP_BRINGUP = 0,
-	ATH12K_CRIT_CONNECTION_FAIL,
+	ATH12K_CRIT_CONNECTION_FAIL = 1,
+	ATH12K_CRIT_PEER_FAILURE = 2,
+	ATH12K_FW_LOAD_FAILURE = 3,
+	ATH12K_BDF_LOAD_FAILURE = 4,
 	ATH12K_CRIT_MAX
 };
 
