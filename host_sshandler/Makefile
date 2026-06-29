@@ -7,7 +7,7 @@ TARGET = libhost_subsystem_handler.so
 DESTDIR ?=
 LIBDIR = $(DESTDIR)/usr/lib
 
-SRCS = utils.c uio.c actions.c subsys_core.c da_interface.c
+SRCS = utils.c uio.c actions.c subsys_core.c da_interface.c hapd_log_listener.c
 OBJS = $(SRCS:.c=.o)
 
 .PHONY: all install clean

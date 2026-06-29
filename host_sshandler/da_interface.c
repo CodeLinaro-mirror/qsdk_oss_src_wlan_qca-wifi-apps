@@ -181,8 +181,10 @@ void lib_init(TelemetryServiceAPPCallbacks *callbacks)
 
 	local_callbacks = callbacks;
 
-	/* Initialize subsys context and start window monitoring thread */
+	/* Initialize subsys context and start monitoring threads */
 	host_subsys_init_ctx(&host_ctx);
 	host_start_window_thread(&host_ctx);
+	/* Start hostapd log trigger listener on the configured iface */
+	host_start_hapd_listener_thread(&host_ctx);
 	ss_handler_uio_devices_maps_callback();
 }
