@@ -16,7 +16,7 @@ static const struct crit_action_map subsys_default_map[] = {
 		SSH_ACTION_POLICY_STOP_ON_REPRODUCE,
 		2,
 		{SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT},
-		{ {"wmi", "mac", "peer"}, {"minidump", "logread"} }
+		{ {"wmi", "mac", "peer"}, {"minidump", "syslog"} }
 	},
 	{
 		ATH12K_CRIT_CONNECTION_FAIL,
@@ -24,7 +24,7 @@ static const struct crit_action_map subsys_default_map[] = {
 		3,
 		{SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT, SS_ACTION_HAPD_PEER_LOG},
 		/* context: ath12k dbgmask "peer", snapshot subcats, hapd (no ctx needed) */
-		{ {"peer"}, {"minidump", "logread"}, {} }
+		{ {"peer"}, {"minidump", "syslog"}, {} }
 	},
 	{
 		ATH12K_FW_LOAD_FAILURE,
@@ -40,6 +40,20 @@ static const struct crit_action_map subsys_default_map[] = {
 		{SS_ACTION_ENABLE_DBG_LOGS_ON_BOOT, SS_ACTION_SNAPSHOT},
 		{ {"boot", "qmi"}, {"minidump"} }
 	},
+	{
+                ATH12K_CRIT_MVR_FAILURE,
+                SSH_ACTION_POLICY_STOP_ON_REPRODUCE,
+                2,
+                {SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT},
+                { {"wmi", "mac"}, {"minidump", "syslog"} }
+        },
+	{
+                ATH12K_CRIT_PEER_FAILURE,
+                SSH_ACTION_POLICY_STOP_ON_REPRODUCE,
+                2,
+                {SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT},
+                { {"peer"}, {"minidump", "syslog"} }
+        },
 };
 
 void subsys_config_init_defaults(struct subsys_config *cfg)

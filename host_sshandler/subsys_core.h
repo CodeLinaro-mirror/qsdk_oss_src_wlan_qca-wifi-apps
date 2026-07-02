@@ -16,7 +16,7 @@
 #define SSH_MAX_ACTIONS_PER_ENUM 4
 #define SSH_MAX_CTX_STRINGS 8
 #define SS_SNAP_KEY_MINIDUMP  "minidump"
-#define SS_SNAP_KEY_LOGREAD   "logread"
+#define SS_SNAP_KEY_SYSLOG    "syslog"
 extern volatile sig_atomic_t t_stop_flag;
 
 enum subsys_action_id {
@@ -39,6 +39,7 @@ enum ath12k_crit_err_type {
 	ATH12K_CRIT_PEER_FAILURE = 2,
 	ATH12K_FW_LOAD_FAILURE = 3,
 	ATH12K_BDF_LOAD_FAILURE = 4,
+	ATH12K_CRIT_MVR_FAILURE = 5,
 	ATH12K_CRIT_MAX
 };
 
