@@ -21,9 +21,10 @@ static const struct crit_action_map subsys_default_map[] = {
 	{
 		ATH12K_CRIT_CONNECTION_FAIL,
 		SSH_ACTION_POLICY_STOP_ON_REPRODUCE,
-		2,
-		{SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT},
-		{ {"peer"}, {"minidump", "logread"} }
+		3,
+		{SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT, SS_ACTION_HAPD_PEER_LOG},
+		/* context: ath12k dbgmask "peer", snapshot subcats, hapd (no ctx needed) */
+		{ {"peer"}, {"minidump", "logread"}, {} }
 	},
 	{
 		ATH12K_FW_LOAD_FAILURE,
@@ -75,6 +76,7 @@ void host_subsys_init_ctx(struct subsys_ctx *ctx)
 	memset(ctx, 0, sizeof(*ctx));
 
 	subsys_config_init_defaults(&ctx->cfg);
+	ctx->cfg.hapd_log_trigger_mask = HAPD_TRIG_ALL;
 	pthread_mutex_init(&ctx->action_lock, NULL);
 
 	for (i = 0; i < ATH12K_CRIT_MAX; i++) {

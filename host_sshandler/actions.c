@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include "subsys_core.h"
 #include "da_interface.h"
+#include "hapd_log_listener.h"
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
 
@@ -583,6 +584,12 @@ void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
 	case SS_ACTION_ENABLE_DBG_LOGS_ON_BOOT:
 		subsys_action_set_boot_dbgmask(action_context);
 		break;
+	case SS_ACTION_HAPD_PEER_LOG:
+		/* The listener thread is always running and responds to
+		 * datagrams from hostapd directly.  Per-peer verbose logging
+		 * is enabled by the listener on receipt of the trigger event;
+		 * no action is needed here at window start. */
+		break;
 	default:
 		break;
 	}
@@ -600,6 +607,9 @@ void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * 
 		break;
 	case SS_ACTION_INC_HAPD_VERBOSITY:
 		disable_hapd_verbose_logs(radio_id);
+		break;
+	case SS_ACTION_HAPD_PEER_LOG:
+		hapd_log_listener_clear_all_peers();
 		break;
 	default:
 		break;
@@ -631,3 +641,4 @@ void host_start_window_thread(struct subsys_ctx *ctx)
 		fprintf(stderr, "host-sshandler: failed to start window thread\n");
 	}
 }
+

@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <signal.h>
+#include "hapd_log_listener.h"
 
 #define SSH_MAX_ACTIONS_PER_ENUM 4
 #define SSH_MAX_CTX_STRINGS 8
@@ -23,6 +24,7 @@ enum subsys_action_id {
 	SS_ACTION_INC_HAPD_VERBOSITY,
 	SS_ACTION_SNAPSHOT,
 	SS_ACTION_ENABLE_DBG_LOGS_ON_BOOT,
+	SS_ACTION_HAPD_PEER_LOG,
 	SS_ACTION_MAX
 };
 
@@ -73,6 +75,7 @@ struct subsys_trigger_state {
 struct subsys_config {
 	bool enable_crit_buffer;
 	struct crit_action_map crit_maps[ATH12K_CRIT_MAX];
+	uint32_t hapd_log_trigger_mask;
 };
 
 struct subsys_ctx {
@@ -82,6 +85,7 @@ struct subsys_ctx {
 	struct subsys_config cfg;
 	pthread_mutex_t action_lock;
 	struct subsys_trigger_state trigger_state[ATH12K_CRIT_MAX];
+	struct hapd_listener_ctx hapd_log_ctx;
 };
 
 const char *ath12k_crit_type_str(enum ath12k_crit_err_type t);
