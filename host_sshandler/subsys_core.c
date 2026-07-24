@@ -26,6 +26,10 @@ const char *ath12k_crit_type_str(enum ath12k_crit_err_type t)
 		return "fw_load_failure";
 	case ATH12K_BDF_LOAD_FAILURE:
 		return "bdf_load_failure";
+	case ATH12K_CRIT_MVR_FAILURE:
+		return "mvr_failure";
+	case ATH12K_CRIT_SCAN_FAILURE:
+		return "scan_failure";
 	default:
 		return "host_unknown";
 	}

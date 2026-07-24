@@ -54,6 +54,13 @@ static const struct crit_action_map subsys_default_map[] = {
                 {SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT},
                 { {"peer"}, {"minidump", "syslog"} }
         },
+	{
+		ATH12K_CRIT_SCAN_FAILURE,
+		SSH_ACTION_POLICY_STOP_ON_REPRODUCE,
+		2,
+		{SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT},
+		{ {"wmi"}, {"minidump", "syslog"} }
+	},
 };
 
 void subsys_config_init_defaults(struct subsys_config *cfg)
