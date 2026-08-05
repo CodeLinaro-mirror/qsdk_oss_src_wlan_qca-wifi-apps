@@ -48,6 +48,7 @@
 #define MOD_IEEE80211  (1U << 0)
 #define MOD_IEEE8021X  (1U << 1)
 #define MOD_MLME       (1U << 2)
+#define MOD_DRIVER     (1U << 3)
 
 /*
  * Per-event hostapd_cli command dispatch table.
@@ -82,6 +83,7 @@ static const struct { uint32_t bit; const char *name; } mod_names[] = {
 	{ MOD_IEEE80211, "ieee80211" },
 	{ MOD_IEEE8021X, "ieee8021x" },
 	{ MOD_MLME,      "mlme"      },
+	{ MOD_DRIVER,    "driver"    },
 };
 #define MOD_NAMES_COUNT (sizeof(mod_names) / sizeof(mod_names[0]))
 
@@ -251,10 +253,28 @@ static const struct hapd_event_cmd eapol_fail_cmds[] = {
 	{ NULL }
 };
 
+/*
+ * vap_create_fail / vap_up_fail: BSS-level events (NULL addr).
+ * Enable driver module verbose logging and dump STATUS for the BSS.
+ */
+static const struct hapd_event_cmd vap_create_fail_cmds[] = {
+	{ "LOG_LEVEL driver debug_verbose", MOD_DRIVER, false },
+	{ "STATUS",                         0,          false },
+	{ NULL }
+};
+
+static const struct hapd_event_cmd vap_up_fail_cmds[] = {
+	{ "LOG_LEVEL driver debug_verbose", MOD_DRIVER, false },
+	{ "STATUS",                         0,          false },
+	{ NULL }
+};
+
 static const struct hapd_event_action event_action_table[] = {
-	{ "auth_reject",  auth_reject_cmds  },
-	{ "assoc_reject", assoc_reject_cmds },
-	{ "eapol_fail",   eapol_fail_cmds   },
+	{ "auth_reject",      auth_reject_cmds      },
+	{ "assoc_reject",     assoc_reject_cmds     },
+	{ "eapol_fail",       eapol_fail_cmds       },
+	{ "vap_create_fail",  vap_create_fail_cmds  },
+	{ "vap_up_fail",      vap_up_fail_cmds      },
 	{ NULL }
 };
 
@@ -271,10 +291,12 @@ static const struct hapd_event_action *find_event_action(const char *event)
 
 static uint32_t event_type_to_bit(const char *ev)
 {
-	if (!ev || !*ev)                  return 0;
-	if (!strcmp(ev, "auth_reject"))   return HAPD_TRIG_AUTH_REJECT;
-	if (!strcmp(ev, "assoc_reject"))  return HAPD_TRIG_ASSOC_REJECT;
-	if (!strcmp(ev, "eapol_fail"))    return HAPD_TRIG_EAPOL_FAIL;
+	if (!ev || !*ev)                          return 0;
+	if (!strcmp(ev, "auth_reject"))           return HAPD_TRIG_AUTH_REJECT;
+	if (!strcmp(ev, "assoc_reject"))          return HAPD_TRIG_ASSOC_REJECT;
+	if (!strcmp(ev, "eapol_fail"))            return HAPD_TRIG_EAPOL_FAIL;
+	if (!strcmp(ev, "vap_create_fail"))       return HAPD_TRIG_VAP_CREATE_FAIL;
+	if (!strcmp(ev, "vap_up_fail"))           return HAPD_TRIG_VAP_UP_FAIL;
 	return 0;
 }
 
