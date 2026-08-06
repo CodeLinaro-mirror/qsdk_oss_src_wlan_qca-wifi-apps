@@ -16,7 +16,7 @@
  * Flow:
  *   hostapd                    host_sshandler
  *   --------                   --------------
- *   auth/assoc/eapol failure
+ *   auth/assoc/4-way handshake failure
  *     |
  *     +--sendto(HAPD_SSH_SOCK_PATH)-->  listener thread
  *          "<event> <mac> <iface>"        |
@@ -25,11 +25,10 @@
  *                                         +-> LOG_PEER <mac>
  *                                         +-> peer_log_add(iface, mac)
  *
- *   subsys action window expires (2 min, managed by ss_handler core):
- *     SS_ACTION_HAPD_PEER_LOG stop
- *       +-> hapd_log_listener_clear_all_peers()
- *             +-> LOG_LEVEL <mod> default   (restore per-module level)
- *             +-> LOG_PEER clear            (clear peer filter + dedup)
+ *   dedicated hostapd log window expires (2 min):
+ *     +-> hapd_log_listener_clear_all_peers()
+ *           +-> LOG_LEVEL INFO
+ *           +-> LOG_PEER clear
  */
 #define HAPD_SSH_SOCK_PATH  "/var/run/host_sshandler.sock"
 
@@ -52,15 +51,13 @@ struct hapd_listener_ctx {
 	uint32_t trigger_mask; /* HAPD_TRIG_* bitmask; 0 = all enabled */
 };
 
-/* Thread entry point — pass struct hapd_listener_ctx * as arg.
+/* Thread entry point receives struct subsys_ctx * as arg.
  * The thread runs for the lifetime of the process, ready to receive
  * datagrams from hostapd at any time. */
 void *subsys_hapd_listener_thread(void *arg);
 
-/* Clear all active peer log filters and restore module log levels.
- * Called by SS_ACTION_HAPD_PEER_LOG stop when the subsys action window
- * expires.  The 2-minute window is managed by ss_handler core, not the
- * listener itself. */
+/* Clear all active peer log filters and restore log levels when the
+ * dedicated hostapd log window expires. */
 void hapd_log_listener_clear_all_peers(void);
 
 /* Start the hapd log listener thread. */
