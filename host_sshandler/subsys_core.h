@@ -88,6 +88,8 @@ struct subsys_ctx {
 	pthread_mutex_t action_lock;
 	struct subsys_trigger_state trigger_state[ATH12K_CRIT_MAX];
 	struct hapd_listener_ctx hapd_log_ctx;
+	bool hapd_log_active;
+	uint64_t hapd_log_window_end_ns;
 };
 
 const char *ath12k_crit_type_str(enum ath12k_crit_err_type t);
@@ -101,6 +103,7 @@ void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
 void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * const* action_context);
 void subsys_uio_drain_crit_ring(struct subsys_ctx *ctx);
 void subsys_update_action_windows(struct subsys_ctx *ctx);
+void subsys_start_hapd_log_window(struct subsys_ctx *ctx);
 void subsys_handle_crit_record(struct subsys_ctx *ctx, const struct ath12k_crit_record *rec);
 void *subsys_critical_buffer_monitor_thread(void *arg);
 

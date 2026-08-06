@@ -21,10 +21,9 @@ static const struct crit_action_map subsys_default_map[] = {
 	{
 		ATH12K_CRIT_CONNECTION_FAIL,
 		SSH_ACTION_POLICY_STOP_ON_REPRODUCE,
-		3,
-		{SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT, SS_ACTION_HAPD_PEER_LOG},
-		/* context: ath12k dbgmask "peer", snapshot subcats, hapd (no ctx needed) */
-		{ {"peer"}, {"minidump", "syslog"}, {} }
+		2,
+		{SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT},
+		{ {"peer"}, {"minidump", "syslog"} }
 	},
 	{
 		ATH12K_FW_LOAD_FAILURE,
