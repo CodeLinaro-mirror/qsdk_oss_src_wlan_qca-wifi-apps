@@ -331,7 +331,18 @@ static bool event_triggers_snapshot(const char *event)
 {
 	return !strcmp(event, "auth_reject") ||
 	       !strcmp(event, "assoc_reject") ||
-	       !strcmp(event, "4way_fail");
+	       !strcmp(event, "4way_fail") ||
+	       !strcmp(event, "vap_create_fail") ||
+	       !strcmp(event, "vap_up_fail");
+}
+
+static enum ath12k_crit_err_type event_snapshot_trigger(const char *event)
+{
+	if (!strcmp(event, "vap_create_fail") ||
+	    !strcmp(event, "vap_up_fail"))
+		return ATH12K_CRIT_VAP_BRINGUP;
+
+	return ATH12K_CRIT_CONNECTION_FAIL;
 }
 
 /*
@@ -509,7 +520,7 @@ void *subsys_hapd_listener_thread(void *arg)
 
 				subsys_action_start(SS_ACTION_SNAPSHOT, 0,
 						    snapshot_context,
-						    ATH12K_CRIT_CONNECTION_FAIL);
+						    event_snapshot_trigger(event_str));
 			}
 		}
 
