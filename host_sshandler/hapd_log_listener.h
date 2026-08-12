@@ -41,10 +41,12 @@
 
 /* Trigger event type bitmasks for hapd_listener_ctx.trigger_mask.
  * 0 (HAPD_TRIG_ALL) enables all event types. */
-#define HAPD_TRIG_AUTH_REJECT   (1U << 0)
-#define HAPD_TRIG_ASSOC_REJECT  (1U << 1)
-#define HAPD_TRIG_EAPOL_FAIL    (1U << 2)
-#define HAPD_TRIG_ALL           0U
+#define HAPD_TRIG_AUTH_REJECT      (1U << 0)
+#define HAPD_TRIG_ASSOC_REJECT     (1U << 1)
+#define HAPD_TRIG_EAPOL_FAIL       (1U << 2)
+#define HAPD_TRIG_VAP_CREATE_FAIL  (1U << 3)
+#define HAPD_TRIG_VAP_UP_FAIL      (1U << 4)
+#define HAPD_TRIG_ALL              0U
 
 struct hapd_listener_ctx {
 	uint32_t trigger_mask; /* HAPD_TRIG_* bitmask; 0 = all enabled */
