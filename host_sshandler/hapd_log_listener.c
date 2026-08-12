@@ -26,6 +26,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include <poll.h>
 #include <pthread.h>
 #include "subsys_core.h"
@@ -152,6 +153,9 @@ static void peer_log_add(const char *iface, const char *addr, uint32_t mod_mask)
 		}
 	}
 	if (g_peer_log_count >= MAX_PEER_LOG_ENTRIES) {
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: peer table full count=%d, dropping iface=%s addr=%s",
+		       g_peer_log_count, iface, addr);
 		pthread_mutex_unlock(&g_peer_log_lock);
 		return;
 	}
@@ -163,19 +167,43 @@ static void peer_log_add(const char *iface, const char *addr, uint32_t mod_mask)
 		e->next = g_peer_log_list;
 		g_peer_log_list = e;
 		g_peer_log_count++;
+	} else {
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: peer allocation failed iface=%s addr=%s",
+		       iface, addr);
 	}
 	pthread_mutex_unlock(&g_peer_log_lock);
 }
 
 static void run_cli(const char *cmd)
 {
+	int status;
 	FILE *p = popen(cmd, "r");
+
 	if (!p) {
 		syslog(LOG_ERR, "host-sshandler [hapd-log]: popen failed errno=%d: %s",
 		       errno, strerror(errno));
 		return;
 	}
-	pclose(p);
+	status = pclose(p);
+	if (status < 0) {
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: pclose failed cmd=[%s] errno=%d: %s",
+		       cmd, errno, strerror(errno));
+	} else if (WIFEXITED(status)) {
+		if (WEXITSTATUS(status))
+			syslog(LOG_ERR,
+			       "host-sshandler [hapd-log]: command exited status=%d cmd=[%s]",
+			       WEXITSTATUS(status), cmd);
+	} else if (WIFSIGNALED(status)) {
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: command killed signal=%d cmd=[%s]",
+		       WTERMSIG(status), cmd);
+	} else {
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: command returned raw status=0x%x cmd=[%s]",
+		       status, cmd);
+	}
 }
 
 /*
@@ -299,6 +327,13 @@ static uint32_t event_type_to_bit(const char *ev)
 	return 0;
 }
 
+static bool event_triggers_snapshot(const char *event)
+{
+	return !strcmp(event, "auth_reject") ||
+	       !strcmp(event, "assoc_reject") ||
+	       !strcmp(event, "4way_fail");
+}
+
 /*
  * Dispatch per-event CLI commands: set per-module verbose level and install
  * peer filter.  Returns OR of all MOD_* bits set so the caller can record
@@ -332,9 +367,15 @@ static uint32_t dispatch_event_cmds(const struct hapd_event_action *act,
 static int listener_bind(void)
 {
 	struct sockaddr_un sa;
+	struct stat st;
+	int ret;
 	int fd;
 
-	unlink(HAPD_SSH_SOCK_PATH);
+	ret = unlink(HAPD_SSH_SOCK_PATH);
+	if (ret < 0 && errno != ENOENT)
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: unlink(%s) failed errno=%d: %s",
+		       HAPD_SSH_SOCK_PATH, errno, strerror(errno));
 
 	fd = socket(AF_UNIX, SOCK_DGRAM, 0);
 	if (fd < 0) {
@@ -354,9 +395,15 @@ static int listener_bind(void)
 		return -1;
 	}
 
-	if (chmod(HAPD_SSH_SOCK_PATH, 0622) < 0)
+	if (chmod(HAPD_SSH_SOCK_PATH, 0622) < 0) {
 		syslog(LOG_ERR, "host-sshandler [hapd-log]: chmod failed errno=%d: %s",
 		       errno, strerror(errno));
+	}
+	if (stat(HAPD_SSH_SOCK_PATH, &st) < 0) {
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: stat(%s) failed errno=%d: %s",
+		       HAPD_SSH_SOCK_PATH, errno, strerror(errno));
+	}
 
 	return fd;
 }
@@ -453,10 +500,27 @@ void *subsys_hapd_listener_thread(void *arg)
 			subsys_start_hapd_log_window(subsys);
 			uint32_t mod_mask = dispatch_event_cmds(act, iface, addr);
 			peer_log_add(iface, addr, mod_mask);
+
+			if (event_triggers_snapshot(event_str)) {
+				char *snapshot_context[] = {
+					SS_SNAP_KEY_SYSLOG,
+					NULL
+				};
+
+				subsys_action_start(SS_ACTION_SNAPSHOT, 0,
+						    snapshot_context,
+						    ATH12K_CRIT_CONNECTION_FAIL);
+			}
 		}
 
-		close(fd);
-		unlink(HAPD_SSH_SOCK_PATH);
+		if (close(fd) < 0)
+			syslog(LOG_ERR,
+			       "host-sshandler [hapd-log]: close fd=%d failed errno=%d: %s",
+			       fd, errno, strerror(errno));
+		if (unlink(HAPD_SSH_SOCK_PATH) < 0 && errno != ENOENT)
+			syslog(LOG_ERR,
+			       "host-sshandler [hapd-log]: cleanup unlink failed errno=%d: %s",
+			       errno, strerror(errno));
 	}
 
 	return NULL;
@@ -466,10 +530,14 @@ static pthread_t hapd_listener_thread;
 
 void host_start_hapd_listener_thread(struct subsys_ctx *ctx)
 {
+	int ret;
+
 	ctx->hapd_log_ctx.trigger_mask = ctx->cfg.hapd_log_trigger_mask;
-	if (pthread_create(&hapd_listener_thread, NULL,
-			   subsys_hapd_listener_thread, ctx) != 0) {
+	ret = pthread_create(&hapd_listener_thread, NULL,
+			     subsys_hapd_listener_thread, ctx);
+	if (ret != 0) {
 		fprintf(stderr,
-			"host-sshandler: failed to start hapd listener thread\n");
+			"host-sshandler [hapd-log]: failed to start listener: %s (%d)\n",
+			strerror(ret), ret);
 	}
 }
