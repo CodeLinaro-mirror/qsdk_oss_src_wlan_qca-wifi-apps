@@ -1,0 +1,12 @@
+# Capture only SUBSCRIBE requests (msg_type at byte offset 8)
+# Provide value in little-endian byte order when using 0x...
+# UDBG_ENH_CTRL_SUBSCRIBE_REQ bytes: 01 00 11 11 -> 0x01001111
+filter: 8, 4, 0x01001111
+
+# Exclude SUBSCRIBE response (example "filter not")
+# UDBG_ENH_CTRL_SUBSCRIBE_RESP bytes: 02 00 11 11 -> 0x02001111
+filter not: 8, 4, 0x02001111
+
+# Example scramble rule format:
+# scramble: match_offset, match_length, match, write_offset, write_length, value
+# scramble: 8, 4, 0x11110002, 40, 16, 0

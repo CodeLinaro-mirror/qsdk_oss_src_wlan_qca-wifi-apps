@@ -1,0 +1,115 @@
+// SPDX-License-Identifier: BSD-3-Clause-Clear
+/*
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ */
+
+#ifndef CONFIG_H
+#define CONFIG_H
+
+#include <limits.h>
+
+#ifndef DEFAULT_SERVER_PORT
+#define DEFAULT_SERVER_PORT 55555
+#endif
+
+#ifndef DEFAULT_TRANSPORT
+#define DEFAULT_TRANSPORT UDBG_ENH_TRANSPORT_UDP
+#endif
+
+#ifndef DEFAULT_SERVER_IP
+#define DEFAULT_SERVER_IP "127.0.0.1"
+#endif
+
+#ifndef DEFAULT_SERVER_MAX_SUBSCRIPTIONS
+#define DEFAULT_SERVER_MAX_SUBSCRIPTIONS 64u
+#endif
+
+#ifndef DEFAULT_SERVER_MAX_LOG_ENTRIES
+#define DEFAULT_SERVER_MAX_LOG_ENTRIES 16u
+#endif
+
+#ifndef UNIX_SOCK_PATH_MAX
+#define UNIX_SOCK_PATH_MAX PATH_MAX
+#endif
+
+#ifndef DEFAULT_CONTROL_SOCKET_PATH
+#define DEFAULT_CONTROL_SOCKET_PATH "/tmp/udbg_enh_server_ctrl.sock"
+#endif
+
+#ifndef DEFAULT_STOP_TIMEOUT_MS
+#define DEFAULT_STOP_TIMEOUT_MS 5000u
+#endif
+
+#ifndef DEFAULT_STOP_POLL_US
+#define DEFAULT_STOP_POLL_US 100000u
+#endif
+
+#ifndef DEFAULT_LIVENESS_CHECK_INTERVAL_MS
+#define DEFAULT_LIVENESS_CHECK_INTERVAL_MS 1000u
+#endif
+
+#ifndef DEFAULT_STALE_TIMEOUT_MS
+#define DEFAULT_STALE_TIMEOUT_MS 30000u
+#endif
+
+#ifndef DEFAULT_PCAPNG_ENABLE
+#define DEFAULT_PCAPNG_ENABLE 0
+#endif
+
+#ifndef DEFAULT_PCAPNG_PATH
+#define DEFAULT_PCAPNG_PATH "udbg_enh_capture.pcapng"
+#endif
+
+#ifndef DEFAULT_UDP_BATCH_ENABLE
+#define DEFAULT_UDP_BATCH_ENABLE 1
+#endif
+
+#ifndef DEFAULT_UDP_BATCH_SIZE
+#define DEFAULT_UDP_BATCH_SIZE 64u
+#endif
+
+#ifndef DEFAULT_UDP_BATCH_BUDGET_US
+#define DEFAULT_UDP_BATCH_BUDGET_US 750u
+#endif
+
+#ifndef SERVER_PORT_MIN
+#define SERVER_PORT_MIN 49152u
+#endif
+
+#ifndef SERVER_PORT_MAX
+#define SERVER_PORT_MAX 65535u
+#endif
+
+#ifndef MAX_SUBSCRIPTIONS_LIMIT
+#define MAX_SUBSCRIPTIONS_LIMIT 65535u
+#endif
+
+#ifndef MAX_LOG_ENTRIES_LIMIT
+#define MAX_LOG_ENTRIES_LIMIT 1000000u
+#endif
+
+#ifndef STOP_TIMEOUT_MS_LIMIT
+#define STOP_TIMEOUT_MS_LIMIT 3600000u
+#endif
+
+#ifndef STOP_POLL_US_LIMIT
+#define STOP_POLL_US_LIMIT 1000000u
+#endif
+
+#ifndef LIVENESS_CHECK_INTERVAL_MS_LIMIT
+#define LIVENESS_CHECK_INTERVAL_MS_LIMIT 3600000u
+#endif
+
+#ifndef STALE_TIMEOUT_MS_LIMIT
+#define STALE_TIMEOUT_MS_LIMIT 3600000u
+#endif
+
+#ifndef UDP_BATCH_SIZE_LIMIT
+#define UDP_BATCH_SIZE_LIMIT 512u
+#endif
+
+#ifndef UDP_BATCH_BUDGET_US_LIMIT
+#define UDP_BATCH_BUDGET_US_LIMIT 1000000u
+#endif
+
+#endif /* CONFIG_H */

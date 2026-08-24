@@ -13,6 +13,8 @@
 #include "subsys_core.h"
 volatile sig_atomic_t t_stop_flag = 0;
 
+#define HAPD_LOG_WINDOW_NS (2ULL * 60ULL * 1000000000ULL)
+
 const char *ath12k_crit_type_str(enum ath12k_crit_err_type t)
 {
 	switch (t) {
@@ -26,6 +28,10 @@ const char *ath12k_crit_type_str(enum ath12k_crit_err_type t)
 		return "fw_load_failure";
 	case ATH12K_BDF_LOAD_FAILURE:
 		return "bdf_load_failure";
+	case ATH12K_CRIT_MVR_FAILURE:
+		return "mvr_failure";
+	case ATH12K_CRIT_SCAN_FAILURE:
+		return "scan_failure";
 	default:
 		return "host_unknown";
 	}
@@ -59,6 +65,22 @@ void subsys_update_action_windows(struct subsys_ctx *ctx)
 			}
 			trig_state->active = false;
 		}
+	}
+	if (ctx->hapd_log_active &&
+	    curr_time >= ctx->hapd_log_window_end_ns) {
+		ctx->hapd_log_active = false;
+		hapd_log_listener_clear_all_peers();
+	}
+	pthread_mutex_unlock(&ctx->action_lock);
+}
+
+void subsys_start_hapd_log_window(struct subsys_ctx *ctx)
+{
+	pthread_mutex_lock(&ctx->action_lock);
+	if (!ctx->hapd_log_active) {
+		ctx->hapd_log_active = true;
+		ctx->hapd_log_window_end_ns =
+			get_monotonic_ns() + HAPD_LOG_WINDOW_NS;
 	}
 	pthread_mutex_unlock(&ctx->action_lock);
 }

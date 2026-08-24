@@ -32,7 +32,7 @@
 #define ATH12K_MINIDUMP_DIR_NAME "minidump"
 #define ATH12K_MINIDUMP_COLLECT "collect"
 #define TEMP_DIR "/tmp"
-#define LOGREAD_CMD          "logread"
+#define SYSLOG_NG_CMD  "cat /var/log/messages"
 #define MINIDUMP_DIR    TEMP_DIR "/minidump"
 #define HOST_DEBUG_DIR  TEMP_DIR "/host_debug_logs"
 #define ATH12K_SNAPSHOT_FILE  "snapshot"
@@ -488,19 +488,18 @@ static bool subsys_snap_collect_minidump(void)
 	return true;
 }
 
-static bool subsys_snap_collect_logread(void)
+static bool subsys_snap_collect_syslog(void)
 {
 	char cmd[MAX_CMD_LEN];
 
-	snprintf(cmd, sizeof(cmd), "%s > %s/logread.txt 2>&1", LOGREAD_CMD, HOST_DEBUG_DIR);
+	snprintf(cmd, sizeof(cmd), "%s > %s/syslog.txt 2>&1", SYSLOG_NG_CMD, HOST_DEBUG_DIR);
 	if (system(cmd) != 0) {
-		fprintf(stderr, "host-sshandler: logread failed\n");
+		fprintf(stderr, "host-sshandler: syslog-ng log collection failed\n");
 		return false;
 	}
 
 	return true;
 }
-
 struct snap_subcategory {
 	const char *key;
 	bool (*collect)(void);
@@ -508,7 +507,7 @@ struct snap_subcategory {
 
 static const struct snap_subcategory snap_subcategory_map[] = {
 	{ SS_SNAP_KEY_MINIDUMP, subsys_snap_collect_minidump },
-	{ SS_SNAP_KEY_LOGREAD,  subsys_snap_collect_logread  },
+	{ SS_SNAP_KEY_SYSLOG,  subsys_snap_collect_syslog  },
 };
 
 static void create_host_snapshot(const char *event_name, char * const *snap_context)

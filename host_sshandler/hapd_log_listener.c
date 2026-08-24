@@ -11,12 +11,9 @@
  * verbose logging (LOG_LEVEL <module> debug_verbose) and install a peer
  * filter (LOG_PEER <mac>) for the failing STA.
  *
- * The 2-minute action window is managed entirely by the ss_handler core
- * subsys machinery (SSH_ACTION_POLICY_STOP_ON_REPRODUCE).  When the window
- * expires, subsys calls SS_ACTION_HAPD_PEER_LOG stop, which invokes
- * hapd_log_listener_clear_all_peers() to restore log levels and clear the
- * peer filter.  The listener thread itself has no timer — it is a pure
- * event receiver.
+ * The ss_handler core maintains a dedicated 2-minute hostapd log window.
+ * The first accepted event starts the deadline; expiry restores log levels
+ * and clears the peer filters even if more failures arrive meanwhile.
  */
 
 #include <stdio.h>
@@ -29,6 +26,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include <poll.h>
 #include <pthread.h>
 #include "subsys_core.h"
@@ -48,6 +46,7 @@
 #define MOD_IEEE80211  (1U << 0)
 #define MOD_IEEE8021X  (1U << 1)
 #define MOD_MLME       (1U << 2)
+#define MOD_DRIVER     (1U << 3)
 
 /*
  * Per-event hostapd_cli command dispatch table.
@@ -82,6 +81,7 @@ static const struct { uint32_t bit; const char *name; } mod_names[] = {
 	{ MOD_IEEE80211, "ieee80211" },
 	{ MOD_IEEE8021X, "ieee8021x" },
 	{ MOD_MLME,      "mlme"      },
+	{ MOD_DRIVER,    "driver"    },
 };
 #define MOD_NAMES_COUNT (sizeof(mod_names) / sizeof(mod_names[0]))
 
@@ -89,7 +89,7 @@ static const struct { uint32_t bit; const char *name; } mod_names[] = {
  * next_token - extract one space-delimited token from a message string.
  *
  * Parses the wire format datagram: "<event> <mac> <iface>"
- * e.g. "eapol_fail aa:bb:cc:dd:ee:ff phy00.1-0"
+ * e.g. "4way_fail aa:bb:cc:dd:ee:ff phy00.1-0"
  *
  * Finds the next space in *src, NUL-terminates the token there, copies it
  * into dst (up to dst_size bytes), and advances *src past the space so the
@@ -153,6 +153,9 @@ static void peer_log_add(const char *iface, const char *addr, uint32_t mod_mask)
 		}
 	}
 	if (g_peer_log_count >= MAX_PEER_LOG_ENTRIES) {
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: peer table full count=%d, dropping iface=%s addr=%s",
+		       g_peer_log_count, iface, addr);
 		pthread_mutex_unlock(&g_peer_log_lock);
 		return;
 	}
@@ -164,25 +167,48 @@ static void peer_log_add(const char *iface, const char *addr, uint32_t mod_mask)
 		e->next = g_peer_log_list;
 		g_peer_log_list = e;
 		g_peer_log_count++;
+	} else {
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: peer allocation failed iface=%s addr=%s",
+		       iface, addr);
 	}
 	pthread_mutex_unlock(&g_peer_log_lock);
 }
 
 static void run_cli(const char *cmd)
 {
+	int status;
 	FILE *p = popen(cmd, "r");
+
 	if (!p) {
 		syslog(LOG_ERR, "host-sshandler [hapd-log]: popen failed errno=%d: %s",
 		       errno, strerror(errno));
 		return;
 	}
-	pclose(p);
+	status = pclose(p);
+	if (status < 0) {
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: pclose failed cmd=[%s] errno=%d: %s",
+		       cmd, errno, strerror(errno));
+	} else if (WIFEXITED(status)) {
+		if (WEXITSTATUS(status))
+			syslog(LOG_ERR,
+			       "host-sshandler [hapd-log]: command exited status=%d cmd=[%s]",
+			       WEXITSTATUS(status), cmd);
+	} else if (WIFSIGNALED(status)) {
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: command killed signal=%d cmd=[%s]",
+		       WTERMSIG(status), cmd);
+	} else {
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: command returned raw status=0x%x cmd=[%s]",
+		       status, cmd);
+	}
 }
 
 /*
  * Restore all per-module log levels and clear peer filters for every
- * tracked iface/peer pair.  Called by SS_ACTION_HAPD_PEER_LOG stop when
- * the 2-minute subsys action window expires.
+ * tracked iface/peer pair when the dedicated hostapd log window expires.
  *
  * Snapshots the list under the lock then releases it before calling popen,
  * so peer_log_add() is not blocked during CLI execution.
@@ -210,6 +236,9 @@ void hapd_log_listener_clear_all_peers(void)
 			run_cli(cmd);
 		}
 		snprintf(cmd, sizeof(cmd),
+			 HAPD_CLI_CMD " -i %s LOG_LEVEL INFO 2>&1", e->iface);
+		run_cli(cmd);
+		snprintf(cmd, sizeof(cmd),
 			 HAPD_CLI_CMD " -i %s LOG_PEER clear 2>&1", e->iface);
 		run_cli(cmd);
 
@@ -224,7 +253,7 @@ void hapd_log_listener_clear_all_peers(void)
  *
  * auth_reject:  ieee80211 + mlme verbose, peer filter
  * assoc_reject: ieee80211 + mlme verbose, peer filter, STATUS dump
- * eapol_fail:   ieee8021x verbose, peer filter, MIB dump
+ * 4way_fail:    ieee8021x verbose, peer filter, MIB dump
  *
  * LOG_LEVEL <module> debug_verbose targets the BSS-scope per-module
  * override only — other modules and other BSSes are unaffected.
@@ -251,10 +280,28 @@ static const struct hapd_event_cmd eapol_fail_cmds[] = {
 	{ NULL }
 };
 
+/*
+ * vap_create_fail / vap_up_fail: BSS-level events (NULL addr).
+ * Enable driver module verbose logging and dump STATUS for the BSS.
+ */
+static const struct hapd_event_cmd vap_create_fail_cmds[] = {
+	{ "LOG_LEVEL driver debug_verbose", MOD_DRIVER, false },
+	{ "STATUS",                         0,          false },
+	{ NULL }
+};
+
+static const struct hapd_event_cmd vap_up_fail_cmds[] = {
+	{ "LOG_LEVEL driver debug_verbose", MOD_DRIVER, false },
+	{ "STATUS",                         0,          false },
+	{ NULL }
+};
+
 static const struct hapd_event_action event_action_table[] = {
-	{ "auth_reject",  auth_reject_cmds  },
-	{ "assoc_reject", assoc_reject_cmds },
-	{ "eapol_fail",   eapol_fail_cmds   },
+	{ "auth_reject",      auth_reject_cmds      },
+	{ "assoc_reject",     assoc_reject_cmds     },
+	{ "4way_fail",        eapol_fail_cmds       },
+	{ "vap_create_fail",  vap_create_fail_cmds  },
+	{ "vap_up_fail",      vap_up_fail_cmds      },
 	{ NULL }
 };
 
@@ -271,11 +318,31 @@ static const struct hapd_event_action *find_event_action(const char *event)
 
 static uint32_t event_type_to_bit(const char *ev)
 {
-	if (!ev || !*ev)                  return 0;
-	if (!strcmp(ev, "auth_reject"))   return HAPD_TRIG_AUTH_REJECT;
-	if (!strcmp(ev, "assoc_reject"))  return HAPD_TRIG_ASSOC_REJECT;
-	if (!strcmp(ev, "eapol_fail"))    return HAPD_TRIG_EAPOL_FAIL;
+	if (!ev || !*ev)                          return 0;
+	if (!strcmp(ev, "auth_reject"))           return HAPD_TRIG_AUTH_REJECT;
+	if (!strcmp(ev, "assoc_reject"))          return HAPD_TRIG_ASSOC_REJECT;
+	if (!strcmp(ev, "4way_fail"))             return HAPD_TRIG_EAPOL_FAIL;
+	if (!strcmp(ev, "vap_create_fail"))       return HAPD_TRIG_VAP_CREATE_FAIL;
+	if (!strcmp(ev, "vap_up_fail"))           return HAPD_TRIG_VAP_UP_FAIL;
 	return 0;
+}
+
+static bool event_triggers_snapshot(const char *event)
+{
+	return !strcmp(event, "auth_reject") ||
+	       !strcmp(event, "assoc_reject") ||
+	       !strcmp(event, "4way_fail") ||
+	       !strcmp(event, "vap_create_fail") ||
+	       !strcmp(event, "vap_up_fail");
+}
+
+static enum ath12k_crit_err_type event_snapshot_trigger(const char *event)
+{
+	if (!strcmp(event, "vap_create_fail") ||
+	    !strcmp(event, "vap_up_fail"))
+		return ATH12K_CRIT_VAP_BRINGUP;
+
+	return ATH12K_CRIT_CONNECTION_FAIL;
 }
 
 /*
@@ -290,6 +357,9 @@ static uint32_t dispatch_event_cmds(const struct hapd_event_action *act,
 	char cli_cmd[256];
 	uint32_t mod_mask = 0;
 
+	snprintf(cli_cmd, sizeof(cli_cmd),
+		 HAPD_CLI_CMD " -i %s LOG_LEVEL EXCESSIVE 2>&1", iface);
+	run_cli(cli_cmd);
 	for (c = act->cmds; c->cmd; c++) {
 		if (c->with_peer)
 			snprintf(cli_cmd, sizeof(cli_cmd),
@@ -308,9 +378,15 @@ static uint32_t dispatch_event_cmds(const struct hapd_event_action *act,
 static int listener_bind(void)
 {
 	struct sockaddr_un sa;
+	struct stat st;
+	int ret;
 	int fd;
 
-	unlink(HAPD_SSH_SOCK_PATH);
+	ret = unlink(HAPD_SSH_SOCK_PATH);
+	if (ret < 0 && errno != ENOENT)
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: unlink(%s) failed errno=%d: %s",
+		       HAPD_SSH_SOCK_PATH, errno, strerror(errno));
 
 	fd = socket(AF_UNIX, SOCK_DGRAM, 0);
 	if (fd < 0) {
@@ -330,10 +406,15 @@ static int listener_bind(void)
 		return -1;
 	}
 
-	/* Root-only: hostapd runs as root and is the only sender. */
-	if (chmod(HAPD_SSH_SOCK_PATH, 0600) < 0)
+	if (chmod(HAPD_SSH_SOCK_PATH, 0622) < 0) {
 		syslog(LOG_ERR, "host-sshandler [hapd-log]: chmod failed errno=%d: %s",
 		       errno, strerror(errno));
+	}
+	if (stat(HAPD_SSH_SOCK_PATH, &st) < 0) {
+		syslog(LOG_ERR,
+		       "host-sshandler [hapd-log]: stat(%s) failed errno=%d: %s",
+		       HAPD_SSH_SOCK_PATH, errno, strerror(errno));
+	}
 
 	return fd;
 }
@@ -345,13 +426,12 @@ static int listener_bind(void)
  * the trigger datagram the instant hostapd sends it.  Starting on demand
  * (e.g. only after a connection failure) would race with the event itself.
  *
- * The 2-minute window and cleanup are driven by the subsys action
- * machinery (SS_ACTION_HAPD_PEER_LOG stop -> hapd_log_listener_clear_all_peers).
- * This thread does not manage any timer.
+ * The core's periodic window updater performs cleanup after two minutes.
  */
 void *subsys_hapd_listener_thread(void *arg)
 {
-	struct hapd_listener_ctx *ctx = arg;
+	struct subsys_ctx *subsys = arg;
+	struct hapd_listener_ctx *ctx = &subsys->hapd_log_ctx;
 	char msg[HAPD_SSH_MSG_MAX];
 	char addr[MAX_MAC_LEN], iface[HAPD_IFACE_LEN], event_str[32];
 
@@ -428,12 +508,30 @@ void *subsys_hapd_listener_thread(void *arg)
 				continue;
 			}
 
+			subsys_start_hapd_log_window(subsys);
 			uint32_t mod_mask = dispatch_event_cmds(act, iface, addr);
 			peer_log_add(iface, addr, mod_mask);
+
+			if (event_triggers_snapshot(event_str)) {
+				char *snapshot_context[] = {
+					SS_SNAP_KEY_SYSLOG,
+					NULL
+				};
+
+				subsys_action_start(SS_ACTION_SNAPSHOT, 0,
+						    snapshot_context,
+						    event_snapshot_trigger(event_str));
+			}
 		}
 
-		close(fd);
-		unlink(HAPD_SSH_SOCK_PATH);
+		if (close(fd) < 0)
+			syslog(LOG_ERR,
+			       "host-sshandler [hapd-log]: close fd=%d failed errno=%d: %s",
+			       fd, errno, strerror(errno));
+		if (unlink(HAPD_SSH_SOCK_PATH) < 0 && errno != ENOENT)
+			syslog(LOG_ERR,
+			       "host-sshandler [hapd-log]: cleanup unlink failed errno=%d: %s",
+			       errno, strerror(errno));
 	}
 
 	return NULL;
@@ -443,11 +541,14 @@ static pthread_t hapd_listener_thread;
 
 void host_start_hapd_listener_thread(struct subsys_ctx *ctx)
 {
+	int ret;
+
 	ctx->hapd_log_ctx.trigger_mask = ctx->cfg.hapd_log_trigger_mask;
-	if (pthread_create(&hapd_listener_thread, NULL,
-			   subsys_hapd_listener_thread,
-			   &ctx->hapd_log_ctx) != 0) {
+	ret = pthread_create(&hapd_listener_thread, NULL,
+			     subsys_hapd_listener_thread, ctx);
+	if (ret != 0) {
 		fprintf(stderr,
-			"host-sshandler: failed to start hapd listener thread\n");
+			"host-sshandler [hapd-log]: failed to start listener: %s (%d)\n",
+			strerror(ret), ret);
 	}
 }

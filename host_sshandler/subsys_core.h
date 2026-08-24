@@ -16,7 +16,7 @@
 #define SSH_MAX_ACTIONS_PER_ENUM 4
 #define SSH_MAX_CTX_STRINGS 8
 #define SS_SNAP_KEY_MINIDUMP  "minidump"
-#define SS_SNAP_KEY_LOGREAD   "logread"
+#define SS_SNAP_KEY_SYSLOG    "syslog"
 extern volatile sig_atomic_t t_stop_flag;
 
 enum subsys_action_id {
@@ -39,6 +39,8 @@ enum ath12k_crit_err_type {
 	ATH12K_CRIT_PEER_FAILURE = 2,
 	ATH12K_FW_LOAD_FAILURE = 3,
 	ATH12K_BDF_LOAD_FAILURE = 4,
+	ATH12K_CRIT_MVR_FAILURE = 5,
+	ATH12K_CRIT_SCAN_FAILURE = 6,
 	ATH12K_CRIT_MAX
 };
 
@@ -86,6 +88,8 @@ struct subsys_ctx {
 	pthread_mutex_t action_lock;
 	struct subsys_trigger_state trigger_state[ATH12K_CRIT_MAX];
 	struct hapd_listener_ctx hapd_log_ctx;
+	bool hapd_log_active;
+	uint64_t hapd_log_window_end_ns;
 };
 
 const char *ath12k_crit_type_str(enum ath12k_crit_err_type t);
@@ -99,6 +103,7 @@ void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
 void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * const* action_context);
 void subsys_uio_drain_crit_ring(struct subsys_ctx *ctx);
 void subsys_update_action_windows(struct subsys_ctx *ctx);
+void subsys_start_hapd_log_window(struct subsys_ctx *ctx);
 void subsys_handle_crit_record(struct subsys_ctx *ctx, const struct ath12k_crit_record *rec);
 void *subsys_critical_buffer_monitor_thread(void *arg);
 
