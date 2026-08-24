@@ -48,7 +48,7 @@ static int ath12k_get_dbgmask_path(char *path_buf, size_t buf_size)
 
 	dir = opendir(ATH12K_DEBUGFS_ROOT);
 	if (!dir) {
-		fprintf(stderr, "host-sshandler: Failed to open %s: %s\n",
+		fprintf(stderr, "HOST_SSHANDLER: Failed to open %s: %s\n",
 			ATH12K_DEBUGFS_ROOT, strerror(errno));
 		return -errno;
 	}
@@ -171,12 +171,12 @@ int ath12k_debug_set_mask_str(const char *mask_name, bool enable)
 
 	fp = fopen(path, "w");
 	if (!fp) {
-		fprintf(stderr, "host-sshandler: Failed to open %s for write: %s\n",
+		fprintf(stderr, "HOST_SSHANDLER: Failed to open %s for write: %s\n",
 			path, strerror(errno));
 		return -errno;
 	}
 
-	fprintf(stderr, "host-sshandler: Updating debug mask: '%s' -> '%s'\n",
+	fprintf(stderr, "HOST_SSHANDLER: Updating debug mask: '%s' -> '%s'\n",
 		current_mask, new_mask);
 
 	if (fprintf(fp, "%s\n", new_mask) < 0)
@@ -235,7 +235,7 @@ static uint64_t subsys_action_compute_boot_dbgmask(char * const *action_context)
 			}
 		}
 		if (j == (int)ARRAY_SIZE(ath12k_dbg_mask_map))
-			fprintf(stderr, "host-sshandler: unknown boot dbg mask name '%s', skipping\n",
+			fprintf(stderr, "HOST_SSHANDLER: unknown boot dbg mask name '%s', skipping\n",
 				action_context[i]);
 	}
 	return mask;
@@ -257,7 +257,7 @@ static void subsys_action_set_boot_dbgmask(char * const *action_context)
 	} else {
 		if (fp)
 			pclose(fp);
-		fprintf(stderr, "host-sshandler: failed to read bootargs via '%s'\n",
+		fprintf(stderr, "HOST_SSHANDLER: failed to read bootargs via '%s'\n",
 			FW_PRINTENV_CMD);
 		return;
 	}
@@ -267,7 +267,7 @@ static void subsys_action_set_boot_dbgmask(char * const *action_context)
 	if (bootargs_val) {
 		bootargs_val++;
 	} else {
-		fprintf(stderr, "host-sshandler: unexpected fw_printenv output: %s\n", buf);
+		fprintf(stderr, "HOST_SSHANDLER: unexpected fw_printenv output: %s\n", buf);
 		return;
 	}
 
@@ -308,21 +308,21 @@ static void subsys_action_set_boot_dbgmask(char * const *action_context)
 			snprintf(cleaned, sizeof(cleaned), "%.*s%s%s",
 				 (int)prefix_len, bootargs_val, mask_tok, after);
 			fprintf(stdout,
-				"host-sshandler: boot mask partially ours; preserving residual=0x%llx\n",
+				"HOST_SSHANDLER: boot mask partially ours; preserving residual=0x%llx\n",
 				(unsigned long long)residual);
 		} else {
 			/* Fully ours: remove the token entirely */
 			snprintf(cleaned, sizeof(cleaned), "%.*s%s",
 				 (int)prefix_len, bootargs_val, after);
 			fprintf(stdout,
-				"host-sshandler: boot mask fully ours - removing (issue reproduced)\n");
+				"HOST_SSHANDLER: boot mask fully ours - removing (issue reproduced)\n");
 		}
 
 		snprintf(cmd, sizeof(cmd), "%s \"%s\"",
 			 FW_SETENV_CMD_PREFIX, cleaned);
-		fprintf(stdout, "host-sshandler: fw_setenv cmd: %s\n", cmd);
+		fprintf(stdout, "HOST_SSHANDLER: fw_setenv cmd: %s\n", cmd);
 		if (system(cmd) != 0)
-			fprintf(stderr, "host-sshandler: fw_setenv failed\n");
+			fprintf(stderr, "HOST_SSHANDLER: fw_setenv failed\n");
 		return;
 	}
 
@@ -330,7 +330,7 @@ static void subsys_action_set_boot_dbgmask(char * const *action_context)
 	dbg_mask = action_context ? subsys_action_compute_boot_dbgmask(action_context) : 0;
 	if (!dbg_mask) {
 		fprintf(stderr,
-			"host-sshandler: no valid boot dbg mask names in action context\n");
+			"HOST_SSHANDLER: no valid boot dbg mask names in action context\n");
 		return;
 	}
 
@@ -338,10 +338,10 @@ static void subsys_action_set_boot_dbgmask(char * const *action_context)
 		 FW_SETENV_CMD_PREFIX, bootargs_val,
 		 (unsigned long long)dbg_mask);
 	fprintf(stdout,
-		"host-sshandler: setting boot dbg mask=0x%llx - reboot to capture. cmd: %s\n",
+		"HOST_SSHANDLER: setting boot dbg mask=0x%llx - reboot to capture. cmd: %s\n",
 		(unsigned long long)dbg_mask, cmd);
 	if (system(cmd) != 0)
-		fprintf(stderr, "host-sshandler: fw_setenv failed\n");
+		fprintf(stderr, "HOST_SSHANDLER: fw_setenv failed\n");
 }
 
 
@@ -375,7 +375,7 @@ static int ath12k_get_minidump_path(char *path_buf)
 
 	dir = opendir(ATH12K_DEBUGFS_ROOT);
 	if (!dir) {
-		fprintf(stderr, "host-sshandler: Failed to open %s: %s\n",
+		fprintf(stderr, "HOST_SSHANDLER: Failed to open %s: %s\n",
 			ATH12K_DEBUGFS_ROOT, strerror(errno));
 		return -errno;
 	}
@@ -407,22 +407,22 @@ static bool trigger_minidump(void)
 
 	ret = ath12k_get_minidump_path(minidump_path);
 	if (ret < 0) {
-		fprintf(stderr, "host-sshandler: Cannot find minidump path\n");
+		fprintf(stderr, "HOST_SSHANDLER: Cannot find minidump path\n");
 		return false;
 	}
 
 	fp = fopen(minidump_path, "w");
 	if (!fp) {
-		fprintf(stderr, "host-sshandler: Cannot open minidump trigger %s: %s\n",
+		fprintf(stderr, "HOST_SSHANDLER: Cannot open minidump trigger %s: %s\n",
 			minidump_path, strerror(errno));
 		return false;
 	}
 
 	if (fprintf(fp, "1\n") < 0)
-		fprintf(stderr, "host-sshandler: Failed to write minidump trigger: %s\n",
+		fprintf(stderr, "HOST_SSHANDLER: Failed to write minidump trigger: %s\n",
 			strerror(errno));
 	else
-		fprintf(stdout, "host-sshandler: Minidump triggered via %s\n",
+		fprintf(stdout, "HOST_SSHANDLER: Minidump triggered via %s\n",
 			minidump_path);
 
 	fclose(fp);
@@ -481,7 +481,7 @@ static bool subsys_snap_collect_minidump(void)
 	nanosleep(&ts, NULL);
 	snprintf(cmd, sizeof(cmd), "mv %s %s/ 2>/dev/null", MINIDUMP_DIR, HOST_DEBUG_DIR);
 	if (system(cmd) != 0) {
-		fprintf(stderr, "host-sshandler: minidump staging failed, MINIDUMP_DIR not found\n");
+		fprintf(stderr, "HOST_SSHANDLER: minidump staging failed, MINIDUMP_DIR not found\n");
 		return false;
 	}
 
@@ -494,7 +494,7 @@ static bool subsys_snap_collect_syslog(void)
 
 	snprintf(cmd, sizeof(cmd), "%s > %s/syslog.txt 2>&1", SYSLOG_NG_CMD, HOST_DEBUG_DIR);
 	if (system(cmd) != 0) {
-		fprintf(stderr, "host-sshandler: syslog-ng log collection failed\n");
+		fprintf(stderr, "HOST_SSHANDLER: syslog-ng log collection failed\n");
 		return false;
 	}
 
@@ -516,12 +516,12 @@ static void create_host_snapshot(const char *event_name, char * const *snap_cont
 	int i, j, collected = 0;
 
 	if (!ath12k_snapshot_is_enabled()) {
-		fprintf(stdout, "host-sshandler: snapshot not enabled, skipping\n");
+		fprintf(stdout, "HOST_SSHANDLER: snapshot not enabled, skipping\n");
 		return;
 	}
 
 	if (!snap_context || !snap_context[0]) {
-		fprintf(stderr, "host-sshandler: SS_ACTION_SNAPSHOT: no subcategories specified, skipping snapshot\n");
+		fprintf(stderr, "HOST_SSHANDLER: SS_ACTION_SNAPSHOT: no subcategories specified, skipping snapshot\n");
 		return;
 	}
 
@@ -541,22 +541,22 @@ static void create_host_snapshot(const char *event_name, char * const *snap_cont
 		}
 
 		if (!matched)
-			fprintf(stderr, "host-sshandler: unknown snapshot subcategory / collection failure '%s', skipping\n",
+			fprintf(stderr, "HOST_SSHANDLER: unknown snapshot subcategory / collection failure '%s', skipping\n",
 				snap_context[i]);
 	}
 
 	if (!collected) {
-		fprintf(stderr, "host-sshandler: no subcategories collected, skipping tar\n");
+		fprintf(stderr, "HOST_SSHANDLER: no subcategories collected, skipping tar\n");
 		goto cleanup;
 	}
 
 	snprintf(cmd, sizeof(cmd), "tar -czf %s -C %s host_debug_logs 2>&1",
 		 HOST_LOGS_FILE_PATH, TEMP_DIR);
 	if (system(cmd) != 0) {
-		fprintf(stderr, "host-sshandler: Failed to create diag tar\n");
+		fprintf(stderr, "HOST_SSHANDLER: Failed to create diag tar\n");
 		goto cleanup;
 	}
-	fprintf(stdout, "host-sshandler: Host debug snapshot tar created -> %s\n",
+	fprintf(stdout, "HOST_SSHANDLER: Host debug snapshot tar created -> %s\n",
 		HOST_LOGS_FILE_PATH);
 
 	da_interface_host_create_snapshot(event_name);
@@ -597,7 +597,7 @@ void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
 void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * const * action_context)
 {
 	if (radio_id == USHRT_MAX) {
-		fprintf(stdout, "host-sshandler : stopping action %d due to timeout\n", act_id);
+		fprintf(stdout, "HOST_SSHANDLER : stopping action %d due to timeout\n", act_id);
 	}
 
 	switch (act_id) {
@@ -637,7 +637,7 @@ void host_start_window_thread(struct subsys_ctx *ctx)
 {
 	if (pthread_create(&host_window_thread, NULL,
 			   host_window_thread_fn, ctx) != 0) {
-		fprintf(stderr, "host-sshandler: failed to start window thread\n");
+		fprintf(stderr, "HOST_SSHANDLER: failed to start window thread\n");
 	}
 }
 

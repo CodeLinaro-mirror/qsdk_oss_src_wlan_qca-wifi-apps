@@ -154,7 +154,7 @@ static void peer_log_add(const char *iface, const char *addr, uint32_t mod_mask)
 	}
 	if (g_peer_log_count >= MAX_PEER_LOG_ENTRIES) {
 		syslog(LOG_ERR,
-		       "host-sshandler [hapd-log]: peer table full count=%d, dropping iface=%s addr=%s",
+		       "HOST_SSHANDLER [hapd-log]: peer table full count=%d, dropping iface=%s addr=%s",
 		       g_peer_log_count, iface, addr);
 		pthread_mutex_unlock(&g_peer_log_lock);
 		return;
@@ -169,7 +169,7 @@ static void peer_log_add(const char *iface, const char *addr, uint32_t mod_mask)
 		g_peer_log_count++;
 	} else {
 		syslog(LOG_ERR,
-		       "host-sshandler [hapd-log]: peer allocation failed iface=%s addr=%s",
+		       "HOST_SSHANDLER [hapd-log]: peer allocation failed iface=%s addr=%s",
 		       iface, addr);
 	}
 	pthread_mutex_unlock(&g_peer_log_lock);
@@ -181,27 +181,27 @@ static void run_cli(const char *cmd)
 	FILE *p = popen(cmd, "r");
 
 	if (!p) {
-		syslog(LOG_ERR, "host-sshandler [hapd-log]: popen failed errno=%d: %s",
+		syslog(LOG_ERR, "HOST_SSHANDLER [hapd-log]: popen failed errno=%d: %s",
 		       errno, strerror(errno));
 		return;
 	}
 	status = pclose(p);
 	if (status < 0) {
 		syslog(LOG_ERR,
-		       "host-sshandler [hapd-log]: pclose failed cmd=[%s] errno=%d: %s",
+		       "HOST_SSHANDLER [hapd-log]: pclose failed cmd=[%s] errno=%d: %s",
 		       cmd, errno, strerror(errno));
 	} else if (WIFEXITED(status)) {
 		if (WEXITSTATUS(status))
 			syslog(LOG_ERR,
-			       "host-sshandler [hapd-log]: command exited status=%d cmd=[%s]",
+			       "HOST_SSHANDLER [hapd-log]: command exited status=%d cmd=[%s]",
 			       WEXITSTATUS(status), cmd);
 	} else if (WIFSIGNALED(status)) {
 		syslog(LOG_ERR,
-		       "host-sshandler [hapd-log]: command killed signal=%d cmd=[%s]",
+		       "HOST_SSHANDLER [hapd-log]: command killed signal=%d cmd=[%s]",
 		       WTERMSIG(status), cmd);
 	} else {
 		syslog(LOG_ERR,
-		       "host-sshandler [hapd-log]: command returned raw status=0x%x cmd=[%s]",
+		       "HOST_SSHANDLER [hapd-log]: command returned raw status=0x%x cmd=[%s]",
 		       status, cmd);
 	}
 }
@@ -385,12 +385,12 @@ static int listener_bind(void)
 	ret = unlink(HAPD_SSH_SOCK_PATH);
 	if (ret < 0 && errno != ENOENT)
 		syslog(LOG_ERR,
-		       "host-sshandler [hapd-log]: unlink(%s) failed errno=%d: %s",
+		       "HOST_SSHANDLER [hapd-log]: unlink(%s) failed errno=%d: %s",
 		       HAPD_SSH_SOCK_PATH, errno, strerror(errno));
 
 	fd = socket(AF_UNIX, SOCK_DGRAM, 0);
 	if (fd < 0) {
-		syslog(LOG_ERR, "host-sshandler [hapd-log]: socket() failed errno=%d: %s",
+		syslog(LOG_ERR, "HOST_SSHANDLER [hapd-log]: socket() failed errno=%d: %s",
 		       errno, strerror(errno));
 		return -1;
 	}
@@ -400,19 +400,19 @@ static int listener_bind(void)
 	snprintf(sa.sun_path, sizeof(sa.sun_path), "%s", HAPD_SSH_SOCK_PATH);
 
 	if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
-		syslog(LOG_ERR, "host-sshandler [hapd-log]: bind(%s) failed errno=%d: %s",
+		syslog(LOG_ERR, "HOST_SSHANDLER [hapd-log]: bind(%s) failed errno=%d: %s",
 		       HAPD_SSH_SOCK_PATH, errno, strerror(errno));
 		close(fd);
 		return -1;
 	}
 
 	if (chmod(HAPD_SSH_SOCK_PATH, 0622) < 0) {
-		syslog(LOG_ERR, "host-sshandler [hapd-log]: chmod failed errno=%d: %s",
+		syslog(LOG_ERR, "HOST_SSHANDLER [hapd-log]: chmod failed errno=%d: %s",
 		       errno, strerror(errno));
 	}
 	if (stat(HAPD_SSH_SOCK_PATH, &st) < 0) {
 		syslog(LOG_ERR,
-		       "host-sshandler [hapd-log]: stat(%s) failed errno=%d: %s",
+		       "HOST_SSHANDLER [hapd-log]: stat(%s) failed errno=%d: %s",
 		       HAPD_SSH_SOCK_PATH, errno, strerror(errno));
 	}
 
@@ -435,12 +435,12 @@ void *subsys_hapd_listener_thread(void *arg)
 	char msg[HAPD_SSH_MSG_MAX];
 	char addr[MAX_MAC_LEN], iface[HAPD_IFACE_LEN], event_str[32];
 
-	openlog("host-sshandler", LOG_PID | LOG_NDELAY, LOG_DAEMON);
+	openlog("HOST_SSHANDLER", LOG_PID | LOG_NDELAY, LOG_DAEMON);
 
 	while (!t_stop_flag) {
 		int fd = listener_bind();
 		if (fd < 0) {
-			syslog(LOG_ERR, "host-sshandler [hapd-log]: bind failed, retry in 5s");
+			syslog(LOG_ERR, "HOST_SSHANDLER [hapd-log]: bind failed, retry in 5s");
 			sleep(5);
 			continue;
 		}
@@ -454,7 +454,7 @@ void *subsys_hapd_listener_thread(void *arg)
 			if (pr < 0) {
 				if (errno == EINTR)
 					continue;
-				syslog(LOG_ERR, "host-sshandler [hapd-log]: poll errno=%d: %s",
+				syslog(LOG_ERR, "HOST_SSHANDLER [hapd-log]: poll errno=%d: %s",
 				       errno, strerror(errno));
 				hapd_log_listener_clear_all_peers();
 				break;
@@ -467,7 +467,7 @@ void *subsys_hapd_listener_thread(void *arg)
 			if (n < 0) {
 				if (errno == EINTR)
 					continue;
-				syslog(LOG_ERR, "host-sshandler [hapd-log]: recv errno=%d: %s",
+				syslog(LOG_ERR, "HOST_SSHANDLER [hapd-log]: recv errno=%d: %s",
 				       errno, strerror(errno));
 				hapd_log_listener_clear_all_peers();
 				break;
@@ -487,13 +487,13 @@ void *subsys_hapd_listener_thread(void *arg)
 				    next_token(&p, addr, sizeof(addr)) < 0 ||
 				    strlcpy(iface, p, sizeof(iface)) >= sizeof(iface) ||
 				    !iface[0]) {
-					syslog(LOG_ERR, "host-sshandler [hapd-log]: malformed: [%s]", msg);
+					syslog(LOG_ERR, "HOST_SSHANDLER [hapd-log]: malformed: [%s]", msg);
 					continue;
 				}
 			}
 
 			if (!iface_is_safe(iface) || !mac_is_safe(addr)) {
-				syslog(LOG_ERR, "host-sshandler [hapd-log]: unsafe input rejected");
+				syslog(LOG_ERR, "HOST_SSHANDLER [hapd-log]: unsafe input rejected");
 				continue;
 			}
 
@@ -504,7 +504,7 @@ void *subsys_hapd_listener_thread(void *arg)
 
 			const struct hapd_event_action *act = find_event_action(event_str);
 			if (!act) {
-				syslog(LOG_ERR, "host-sshandler [hapd-log]: unknown event: [%s]", event_str);
+				syslog(LOG_ERR, "HOST_SSHANDLER [hapd-log]: unknown event: [%s]", event_str);
 				continue;
 			}
 
@@ -526,11 +526,11 @@ void *subsys_hapd_listener_thread(void *arg)
 
 		if (close(fd) < 0)
 			syslog(LOG_ERR,
-			       "host-sshandler [hapd-log]: close fd=%d failed errno=%d: %s",
+			       "HOST_SSHANDLER [hapd-log]: close fd=%d failed errno=%d: %s",
 			       fd, errno, strerror(errno));
 		if (unlink(HAPD_SSH_SOCK_PATH) < 0 && errno != ENOENT)
 			syslog(LOG_ERR,
-			       "host-sshandler [hapd-log]: cleanup unlink failed errno=%d: %s",
+			       "HOST_SSHANDLER [hapd-log]: cleanup unlink failed errno=%d: %s",
 			       errno, strerror(errno));
 	}
 
@@ -548,7 +548,7 @@ void host_start_hapd_listener_thread(struct subsys_ctx *ctx)
 			     subsys_hapd_listener_thread, ctx);
 	if (ret != 0) {
 		fprintf(stderr,
-			"host-sshandler [hapd-log]: failed to start listener: %s (%d)\n",
+			"HOST_SSHANDLER [hapd-log]: failed to start listener: %s (%d)\n",
 			strerror(ret), ret);
 	}
 }

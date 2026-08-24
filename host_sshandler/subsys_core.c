@@ -19,21 +19,21 @@ const char *ath12k_crit_type_str(enum ath12k_crit_err_type t)
 {
 	switch (t) {
 	case ATH12K_CRIT_VAP_BRINGUP:
-		return "vap_bringup";
+		return "host_vap_bringup_failure";
 	case ATH12K_CRIT_CONNECTION_FAIL:
-		return "connection_fail";
+		return "host_connection_failure";
 	case ATH12K_CRIT_PEER_FAILURE:
-		return "peer_failure";
+		return "host_peer_failure";
 	case ATH12K_FW_LOAD_FAILURE:
-		return "fw_load_failure";
+		return "host_fw_load_failure";
 	case ATH12K_BDF_LOAD_FAILURE:
-		return "bdf_load_failure";
+		return "host_bdf_load_failure";
 	case ATH12K_CRIT_MVR_FAILURE:
-		return "mvr_failure";
+		return "host_mvr_failure";
 	case ATH12K_CRIT_SCAN_FAILURE:
-		return "scan_failure";
+		return "host_scan_failure";
 	default:
-		return "host_unknown";
+		return "host_unknown_failure";
 	}
 }
 
@@ -104,7 +104,7 @@ static void subsys_start_and_update_trigger_window(struct subsys_ctx *ctx,
 					    map->action_context[i],
 					    rec->trigger);
 		}
-		fprintf(stdout, "host-sshandler : Critical Error Actions triggered for  ath12k-crit-enum=%u.\n", rec->trigger);
+		fprintf(stdout, "HOST_SSHANDLER : Critical Error Actions triggered for  ath12k-crit-enum=%u.\n", rec->trigger);
 		return;
 	}
 
@@ -113,7 +113,7 @@ static void subsys_start_and_update_trigger_window(struct subsys_ctx *ctx,
 		trig_state->trigger_count++;
 	}
 	else if (map->policy == SSH_ACTION_POLICY_STOP_ON_REPRODUCE) {
-		fprintf(stdout, "host-sshandler : Critical Error Reproduced ath12k-crit-enum=%u.\n", rec->trigger);
+		fprintf(stdout, "HOST_SSHANDLER : Critical Error Reproduced ath12k-crit-enum=%u.\n", rec->trigger);
 
 		if (trig_state->trigger_count >= 1) {
 			for (uint32_t i = 0; i < map->num_actions; i++) {
@@ -128,7 +128,7 @@ void subsys_handle_crit_record(struct subsys_ctx *ctx, const struct ath12k_crit_
 {
 	uint64_t curr_time = rec->ts_nsec;
 
-	fprintf(stderr, "host-sshandler : ath12k-crit-enum=%u radio=%u\n",
+	fprintf(stderr, "HOST_SSHANDLER : ath12k-crit-enum=%u radio=%u\n",
 			rec->trigger, rec->radio_id);
 
 	pthread_mutex_lock(&ctx->action_lock);
@@ -136,7 +136,7 @@ void subsys_handle_crit_record(struct subsys_ctx *ctx, const struct ath12k_crit_
 	const struct crit_action_map *map = find_map_for_enum(&ctx->cfg, (enum ath12k_crit_err_type)rec->trigger);
 
 	if (!map) {
-		fprintf(stderr, "host-sshandler : No action map for enum=%u\n", rec->trigger);
+		fprintf(stderr, "HOST_SSHANDLER : No action map for enum=%u\n", rec->trigger);
 		pthread_mutex_unlock(&ctx->action_lock);
 		return;
 	}
@@ -164,13 +164,13 @@ void *subsys_critical_buffer_monitor_thread(void *arg)
 				uint32_t irq_count;
 
 				if (read(uiofd, &irq_count, sizeof(irq_count)) == sizeof(irq_count)) {
-					fprintf(stdout, "host-sshandler : Read successful\n");
+					fprintf(stdout, "HOST_SSHANDLER : Read successful\n");
 				}
 			}
 			subsys_uio_drain_crit_ring(ctx);
 		}
 		else if (errno != EINTR) {
-			fprintf(stderr, "host-sshandler : Poll failed: %s\n", strerror(errno));
+			fprintf(stderr, "HOST_SSHANDLER : Poll failed: %s\n", strerror(errno));
 			sleep(1);
 		}
 	}
