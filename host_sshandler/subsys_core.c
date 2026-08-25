@@ -58,12 +58,13 @@ void subsys_update_action_windows(struct subsys_ctx *ctx)
 		if (trig_state->active && curr_time >= trig_state->window_end_ns) {
 			map = find_map_for_enum(&ctx->cfg, (enum ath12k_crit_err_type)i);
 
-			if (map) {
-				for (uint32_t k = 0; k < map->num_actions; k++) {
-					subsys_action_stop(map->actions[k], USHRT_MAX, map->action_context[k]);
+				if (map) {
+					for (uint32_t k = 0; k < map->num_actions; k++) {
+						subsys_action_stop(map->actions[k], USHRT_MAX,
+								   map->action_context[k], trig_state->trigger_id);
+					}
 				}
-			}
-			trig_state->active = false;
+				trig_state->active = false;
 		}
 	}
 	if (ctx->hapd_log_active &&
@@ -117,7 +118,7 @@ static void subsys_start_and_update_trigger_window(struct subsys_ctx *ctx,
 
 		if (trig_state->trigger_count >= 1) {
 			for (uint32_t i = 0; i < map->num_actions; i++) {
-				subsys_action_stop(map->actions[i], rec->radio_id, map->action_context[i]);
+				subsys_action_stop(map->actions[i], rec->radio_id, map->action_context[i], rec->trigger);
 			}
 			trig_state->active = false;
 		}
