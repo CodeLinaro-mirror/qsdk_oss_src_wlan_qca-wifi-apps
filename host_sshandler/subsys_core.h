@@ -100,7 +100,8 @@ long subsys_uio_read_map_size(int uio_index);
 void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
 			 char * const *action_context,
 			 enum ath12k_crit_err_type trigger);
-void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * const* action_context);
+void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * const* action_context,
+			enum ath12k_crit_err_type trigger);
 void subsys_uio_drain_crit_ring(struct subsys_ctx *ctx);
 void subsys_update_action_windows(struct subsys_ctx *ctx);
 void subsys_start_hapd_log_window(struct subsys_ctx *ctx);

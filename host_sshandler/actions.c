@@ -78,8 +78,11 @@ static int ath12k_read_current_mask(const char *path, char *buf, size_t size)
 	int ret = -EIO;
 
 	fp = fopen(path, "r");
-	if (!fp)
+	if (!fp) {
+		fprintf(stderr, "HOST_SSHANDLER: Failed to open %s for read: %s\n",
+			path, strerror(errno));
 		return -errno;
+	}
 
 	buf[0] = '\0';
 
@@ -347,14 +350,50 @@ static void subsys_action_set_boot_dbgmask(char * const *action_context)
 
 static void subsys_process_debug_masks(char * const * action_context, bool enable)
 {
-	int i = 0;
+	char path[MAX_PATH_LEN];
+	char current_mask[MAX_MASK_BUF_LEN];
+	char new_mask[MAX_MASK_BUF_LEN];
+	FILE *fp;
+	int i, ret;
+
 	if (!action_context)
 		return;
 
-	while (i < SSH_MAX_CTX_STRINGS && action_context[i] != NULL) {
-		ath12k_debug_set_mask_str(action_context[i], enable);
-		i++;
+	ret = ath12k_get_dbgmask_path(path, sizeof(path));
+	if (ret < 0)
+		return;
+
+	ret = ath12k_read_current_mask(path, current_mask, sizeof(current_mask));
+	if (ret < 0 && ret != -EIO)
+		return;
+	if (ret == -EIO)
+		current_mask[0] = '\0';
+
+	snprintf(new_mask, sizeof(new_mask), "%s", current_mask);
+	for (i = 0; i < SSH_MAX_CTX_STRINGS && action_context[i] != NULL; i++) {
+		char tmp[MAX_MASK_BUF_LEN];
+
+		ath12k_update_mask_buffer(new_mask, action_context[i], enable, tmp, sizeof(tmp));
+		snprintf(new_mask, sizeof(new_mask), "%s", tmp);
 	}
+
+	if (strcmp(current_mask, new_mask) == 0)
+		return;
+
+	fp = fopen(path, "w");
+	if (!fp) {
+		fprintf(stderr, "HOST_SSHANDLER: Failed to open %s for write: %s\n",
+			path, strerror(errno));
+		return;
+	}
+
+	fprintf(stderr, "HOST_SSHANDLER: Updating debug mask: '%s' -> '%s'\n",
+		current_mask, new_mask);
+
+	if (fprintf(fp, "%s\n", new_mask) < 0)
+		fprintf(stderr, "HOST_SSHANDLER: Failed to write debug mask\n");
+
+	fclose(fp);
 }
 
 static void enable_hapd_verbose_logs(uint16_t radio_id)
@@ -594,7 +633,7 @@ void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
 	}
 }
 
-void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * const * action_context)
+void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * const * action_context, enum ath12k_crit_err_type trigger)
 {
 	if (radio_id == USHRT_MAX) {
 		fprintf(stdout, "host-sshandler : stopping action %d due to timeout\n", act_id);
@@ -609,6 +648,10 @@ void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * 
 		break;
 	case SS_ACTION_HAPD_PEER_LOG:
 		hapd_log_listener_clear_all_peers();
+		break;
+	case SS_ACTION_SNAPSHOT:
+		if (radio_id != USHRT_MAX)
+			create_host_snapshot(ath12k_crit_type_str(trigger), action_context);
 		break;
 	default:
 		break;
