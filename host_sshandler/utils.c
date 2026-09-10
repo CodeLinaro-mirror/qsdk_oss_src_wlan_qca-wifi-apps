@@ -83,7 +83,7 @@ const struct crit_action_map * find_map_for_enum(const struct subsys_config *cfg
 						enum ath12k_crit_err_type crit_err_enum)
 {
 	if (crit_err_enum < 0 || crit_err_enum >= ATH12K_CRIT_MAX) {
-		fprintf(stderr, "host-sshandler : No action map found for this critical error\n");
+		fprintf(stderr, "HOST_SSHANDLER : No action map found for this critical error\n");
 		return NULL;
 	}
 	return &cfg->crit_maps[crit_err_enum];

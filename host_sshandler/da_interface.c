@@ -23,7 +23,7 @@ void da_interface_host_create_snapshot(const char *event_name)
 
 	if (!local_callbacks || !local_callbacks->create_snapshot) {
 		fprintf(stderr,
-			"host-sshandler: create_snapshot callback not available\n");
+			"HOST_SSHANDLER: create_snapshot callback not available\n");
 		return;
 	}
 
@@ -33,13 +33,13 @@ void da_interface_host_create_snapshot(const char *event_name)
 
 	if (ret == 0) {
 		fprintf(stdout,
-			"host-sshandler: [INFO] snapshot triggered successfully for event '%s'\n",
+			"HOST_SSHANDLER: [INFO] snapshot triggered successfully for event '%s'\n",
 			event_name ? event_name : "unknown");
 		fprintf(stdout,
-			"host-sshandler: [INFO] snapshot will be uploaded to cloud\n");
+			"HOST_SSHANDLER: [INFO] snapshot will be uploaded to cloud\n");
 	} else {
 		fprintf(stderr,
-			"host-sshandler: [ERROR] failed to trigger snapshot for event '%s' (ret=%d)\n",
+			"HOST_SSHANDLER: [ERROR] failed to trigger snapshot for event '%s' (ret=%d)\n",
 			event_name ? event_name : "unknown", ret);
 	}
 }
@@ -54,13 +54,13 @@ void handle_subsystem_notification(subsystem_notification_msg *notification)
 	if (notification->msg_type != SUBSYSTEM_NOTIFICATION_SNAPSHOT_COMPLETE)
 		return;
 
-	fprintf(stdout, "host-sshandler: snapshot complete, removing staging file %s\n",
+	fprintf(stdout, "HOST_SSHANDLER: snapshot complete, removing staging file %s\n",
 			HOST_LOGS_FILE_PATH);
 
 	snprintf(cmd, sizeof(cmd), "rm -f %s", HOST_LOGS_FILE_PATH);
 	if (system(cmd) != 0)
 		fprintf(stderr,
-			"host-sshandler: failed to remove staging file %s\n",
+			"HOST_SSHANDLER: failed to remove staging file %s\n",
 			HOST_LOGS_FILE_PATH);
 }
 
@@ -87,19 +87,19 @@ void service_interrupt_from_telemetry_uio_driver(struct uio_interrupt_data *intr
 	struct ath12k_crit_record *rec;
 
 	if (!local_callbacks || !local_callbacks->read_debug_uio_data) {
-		fprintf(stderr, "host-sshandler : read callback not available\n");
+		fprintf(stderr, "HOST_SSHANDLER : read callback not available\n");
 		return;
 	}
 
 	read_size = intr_data->size_in_bytes_to_read;
 	if (read_size == 0) {
-		fprintf(stderr, "host-sshandler : Buffer carries zero-length data\n");
+		fprintf(stderr, "HOST_SSHANDLER : Buffer carries zero-length data\n");
 		return;
 	}
 	if (read_size > (uint32_t)sizeof(buf)) {
 		read_size = (uint32_t)sizeof(buf);
 		fprintf(stdout,
-			"host-sshandler: read size clamped to maximum buffer size\n");
+			"HOST_SSHANDLER: read size clamped to maximum buffer size\n");
 	}
 
 	memset(buf, 0, sizeof(buf));
@@ -117,7 +117,7 @@ void service_interrupt_from_telemetry_uio_driver(struct uio_interrupt_data *intr
 
 	if (ret != 0) {
 		fprintf(stderr,
-			"host-sshandler : read uio data failed: ret=%d", ret);
+			"HOST_SSHANDLER : read uio data failed: ret=%d", ret);
 		fprintf(stderr, " handler=%d offset=%u size=%u)\n",
 				SUBSYSTEM_HANDLER_HOST_SUBSYSTEM_HANDLER,
 				intr_data->offset_from_base, read_size);
@@ -126,13 +126,13 @@ void service_interrupt_from_telemetry_uio_driver(struct uio_interrupt_data *intr
 
 	if (read_size >= sizeof(struct ath12k_crit_record)) {
 		rec = (struct ath12k_crit_record *)buf;
-		fprintf(stdout, "host-sshandler : ts_nsec=%llu trigger=%u radio_id=%u\n",
+		fprintf(stdout, "HOST_SSHANDLER : ts_nsec=%llu trigger=%u radio_id=%u\n",
 				(unsigned long long)rec->ts_nsec,
 				rec->trigger,
 				rec->radio_id);
 		subsys_handle_crit_record(&host_ctx, rec);
 	} else {
-		fprintf(stderr, "host-sshandler : unexpected read_size=%u\n",
+		fprintf(stderr, "HOST_SSHANDLER : unexpected read_size=%u\n",
 				read_size);
 	}
 }
@@ -156,7 +156,7 @@ void ss_handler_uio_devices_maps_callback(void)
 	int32_t count = 1;
 
 	if (!local_callbacks) {
-		fprintf(stderr, "host-sshandler : Debug Agent callbacks are NULL\n");
+		fprintf(stderr, "HOST_SSHANDLER : Debug Agent callbacks are NULL\n");
 		return;
 	}
 
@@ -166,7 +166,7 @@ void ss_handler_uio_devices_maps_callback(void)
 				uio_ids, map_ids, count);
 	} else {
 		fprintf(stderr,
-			"host-sshandler : %s registration failed\n",
+			"HOST_SSHANDLER : %s registration failed\n",
 			__func__);
 	}
 }
@@ -174,7 +174,7 @@ void ss_handler_uio_devices_maps_callback(void)
 void lib_init(TelemetryServiceAPPCallbacks *callbacks)
 {
 	if (!callbacks) {
-		fprintf(stderr, "host-sshandler : %s: Debug Agent callbacks are NULL\n",
+		fprintf(stderr, "HOST_SSHANDLER : %s: Debug Agent callbacks are NULL\n",
 			__func__);
 		return;
 	}
