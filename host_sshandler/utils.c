@@ -60,6 +60,20 @@ static const struct crit_action_map subsys_default_map[] = {
 		{SS_ACTION_ENABLE_DBG_LOGS, SS_ACTION_SNAPSHOT},
 		{ {"wmi"}, {"minidump", "syslog"} }
 	},
+	{
+		ATH12K_CRIT_AD_DISCONNECT,
+		SSH_ACTION_POLICY_STOP_ON_REPRODUCE,
+		1,
+		{SS_ACTION_SNAPSHOT},
+		{ {"minidump", "syslog"} }
+	},
+	{
+		ATH12K_CRIT_AD_FAIL_CONNECT,
+		SSH_ACTION_POLICY_STOP_ON_REPRODUCE,
+		1,
+		{SS_ACTION_SNAPSHOT},
+		{ {"minidump", "syslog"} }
+	},
 };
 
 void subsys_config_init_defaults(struct subsys_config *cfg)
@@ -105,4 +119,7 @@ void host_subsys_init_ctx(struct subsys_ctx *ctx)
 		ctx->trigger_state[i].window_end_ns = 0;
 		ctx->trigger_state[i].trigger_count = 0;
 	}
+
+	ctx->anomaly_tracker_count = 0;
+	memset(ctx->anomaly_trackers, 0, sizeof(ctx->anomaly_trackers));
 }

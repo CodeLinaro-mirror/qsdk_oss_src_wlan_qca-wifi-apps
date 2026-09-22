@@ -32,6 +32,10 @@ const char *ath12k_crit_type_str(enum ath12k_crit_err_type t)
 		return "host_mvr_failure";
 	case ATH12K_CRIT_SCAN_FAILURE:
 		return "host_scan_failure";
+	case ATH12K_CRIT_AD_FAIL_CONNECT:
+		return "host_ad_connect_failure";
+	case ATH12K_CRIT_AD_DISCONNECT:
+		return "host_ad_disconnect_failure";
 	default:
 		return "host_unknown_failure";
 	}
