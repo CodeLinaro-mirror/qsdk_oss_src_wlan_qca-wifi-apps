@@ -19,10 +19,9 @@
 #define SSH_MAX_CTX_STRINGS 8
 #define SS_SNAP_KEY_MINIDUMP  "minidump"
 #define SS_SNAP_KEY_SYSLOG    "syslog"
-
 #define HOST_DEBUG_DIR           "/tmp/host_debug_logs"
 #define HOST_MASTER_ANOMALY_LOG  HOST_DEBUG_DIR "/host_anomaly_master.log"
-
+#define SS_SNAP_KEY_HAPD_CORE "hostapd_core"
 extern volatile sig_atomic_t t_stop_flag;
 
 enum subsys_action_id {
@@ -112,6 +111,7 @@ void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
 			 enum ath12k_crit_err_type trigger);
 void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * const* action_context,
 			enum ath12k_crit_err_type trigger);
+void subsys_action_hostapd_crash_snapshot(const struct hapd_crash_info *info);
 void subsys_uio_drain_crit_ring(struct subsys_ctx *ctx);
 void subsys_update_action_windows(struct subsys_ctx *ctx);
 void subsys_start_hapd_log_window(struct subsys_ctx *ctx);

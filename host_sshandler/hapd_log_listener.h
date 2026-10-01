@@ -7,6 +7,7 @@
 #define HAPD_LOG_LISTENER_H
 
 #include <stdint.h>
+#include <sys/types.h>
 
 #define HAPD_IFACE_LEN      32
 /* Well-known socket path for direct hostapd -> sshandler notification.
@@ -35,8 +36,21 @@
 /* Wire format of each datagram (NUL-terminated string):
  *   "<event> <mac> <iface>"
  * e.g. "assoc_reject aa:bb:cc:dd:ee:ff phy00.1-0"
+ *
+ * Hostapd crash datagrams use a separate format because a fatal signal has
+ * no BSS or station context:
+ *   "hostapd_crash <pid> <signal> <executable>"
+ * e.g. "hostapd_crash 1234 11 hostapd"
  */
 #define HAPD_SSH_MSG_MAX    128
+#define HAPD_CRASH_EVENT    "hostapd_crash"
+#define HAPD_CRASH_EXE_LEN  32
+
+struct hapd_crash_info {
+	pid_t pid;
+	int signal;
+	char executable[HAPD_CRASH_EXE_LEN];
+};
 
 /* Trigger event type bitmasks for hapd_listener_ctx.trigger_mask.
  * 0 (HAPD_TRIG_ALL) enables all event types. */

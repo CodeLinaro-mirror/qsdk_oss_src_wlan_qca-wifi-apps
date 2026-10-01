@@ -5,7 +5,8 @@
  * hapd_log_listener - direct Unix socket receiver for host_sshandler.
  *
  * hostapd sends a datagram to HAPD_SSH_SOCK_PATH on every connection
- * failure event.  Wire format: "<event> <mac> <iface>"
+ * failure event.  Normal wire format: "<event> <mac> <iface>".
+ * Crash wire format: "hostapd_crash <pid> <signal> <executable>".
  *
  * On trigger, per-event hostapd_cli commands enable BSS-scope per-module
  * verbose logging (LOG_LEVEL <module> debug_verbose) and install a peer
@@ -29,6 +30,8 @@
 #include <sys/wait.h>
 #include <poll.h>
 #include <pthread.h>
+#include <signal.h>
+#include <limits.h>
 #include "subsys_core.h"
 #include "hapd_log_listener.h"
 
@@ -38,6 +41,7 @@
 
 #define MAX_MAC_LEN           18
 #define MAX_PEER_LOG_ENTRIES  32  /* cap against MAC flood DoS */
+#define HAPD_CRASH_QUEUE_SIZE 4
 
 /*
  * Bitmask of hostapd modules that may be overridden by any event action.
@@ -76,6 +80,21 @@ static struct hapd_peer_log_entry *g_peer_log_list;
 static int                         g_peer_log_count;
 static pthread_mutex_t g_peer_log_lock = PTHREAD_MUTEX_INITIALIZER;
 
+struct hapd_crash_queue {
+	struct hapd_crash_info jobs[HAPD_CRASH_QUEUE_SIZE];
+	size_t head;
+	size_t tail;
+	size_t count;
+	pthread_mutex_t lock;
+	pthread_cond_t cond;
+};
+
+static struct hapd_crash_queue g_crash_queue = {
+	.lock = PTHREAD_MUTEX_INITIALIZER,
+	.cond = PTHREAD_COND_INITIALIZER,
+};
+static pthread_t hapd_crash_worker_thread;
+
 /* Module name strings must match hostapd_mod_str_to_idx() in hostapd_log.c */
 static const struct { uint32_t bit; const char *name; } mod_names[] = {
 	{ MOD_IEEE80211, "ieee80211" },
@@ -109,6 +128,145 @@ static int next_token(char **src, char *dst, size_t dst_size)
 		return -1;
 	*src = end + 1;
 	return 0;
+}
+
+static bool crash_executable_is_safe(const char *s)
+{
+	if (!s || !*s)
+		return false;
+
+	for (; *s; s++) {
+		if ((*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z') ||
+		    (*s >= '0' && *s <= '9') || *s == '.' || *s == '-' ||
+		    *s == '_')
+			continue;
+		return false;
+	}
+
+	return true;
+}
+
+static int parse_crash_number(const char *s, unsigned long max,
+				      unsigned long *value)
+{
+	char *end;
+	unsigned long parsed;
+
+	if (!s || !*s || !value)
+		return -1;
+
+	errno = 0;
+	parsed = strtoul(s, &end, 10);
+	if (errno || end == s || *end || parsed == 0 || parsed > max)
+		return -1;
+
+	*value = parsed;
+	return 0;
+}
+
+/*
+ * Parse the hostapd crash wire format.  Return 1 for a crash event, 0 when
+ * the datagram is a normal hostapd event, and -1 for a malformed crash event.
+ */
+static int parse_hostapd_crash_event(char *msg, struct hapd_crash_info *info)
+{
+	char event[32];
+	char pid_str[24];
+	char signal_str[24];
+	char *p;
+	char *separator;
+	unsigned long pid;
+	unsigned long signal_number;
+	int ret;
+
+	if (!msg || !info)
+		return -1;
+
+	p = msg;
+	if (next_token(&p, event, sizeof(event)) < 0)
+		return 0;
+	if (strcmp(event, HAPD_CRASH_EVENT) != 0)
+		return 0;
+
+	if (next_token(&p, pid_str, sizeof(pid_str)) < 0)
+		return -1;
+
+	separator = strchr(p, ' ');
+	if (separator) {
+		*separator = '\0';
+		if (strlcpy(signal_str, p, sizeof(signal_str)) >=
+		    sizeof(signal_str))
+			return -1;
+		p = separator + 1;
+	} else {
+		if (strlcpy(signal_str, p, sizeof(signal_str)) >=
+		    sizeof(signal_str))
+			return -1;
+		p = NULL;
+	}
+
+	ret = parse_crash_number(pid_str, (unsigned long)INT_MAX, &pid);
+	if (ret < 0 || parse_crash_number(signal_str, (unsigned long)NSIG,
+					  &signal_number) < 0)
+		return -1;
+
+	memset(info, 0, sizeof(*info));
+	info->pid = (pid_t)pid;
+	info->signal = (int)signal_number;
+	if (p && *p) {
+		if (strlcpy(info->executable, p,
+			    sizeof(info->executable)) >= sizeof(info->executable) ||
+		    !crash_executable_is_safe(info->executable))
+			return -1;
+	} else {
+		strlcpy(info->executable, "hostapd", sizeof(info->executable));
+	}
+
+	return 1;
+}
+
+static void queue_hostapd_crash(const struct hapd_crash_info *info)
+{
+	pthread_mutex_lock(&g_crash_queue.lock);
+	if (g_crash_queue.count >= HAPD_CRASH_QUEUE_SIZE) {
+		syslog(LOG_ERR,
+		       "HOST_SSHANDLER [hapd-crash]: queue full, dropping pid=%ld signal=%d",
+		       (long)info->pid, info->signal);
+		pthread_mutex_unlock(&g_crash_queue.lock);
+		return;
+	}
+
+	g_crash_queue.jobs[g_crash_queue.tail] = *info;
+	g_crash_queue.tail = (g_crash_queue.tail + 1) % HAPD_CRASH_QUEUE_SIZE;
+	g_crash_queue.count++;
+	pthread_cond_signal(&g_crash_queue.cond);
+	pthread_mutex_unlock(&g_crash_queue.lock);
+}
+
+static void *hapd_crash_worker(void *arg)
+{
+	(void)arg;
+
+	for (;;) {
+		struct hapd_crash_info info;
+
+		pthread_mutex_lock(&g_crash_queue.lock);
+		while (g_crash_queue.count == 0)
+			pthread_cond_wait(&g_crash_queue.cond, &g_crash_queue.lock);
+
+		info = g_crash_queue.jobs[g_crash_queue.head];
+		g_crash_queue.head =
+			(g_crash_queue.head + 1) % HAPD_CRASH_QUEUE_SIZE;
+		g_crash_queue.count--;
+		pthread_mutex_unlock(&g_crash_queue.lock);
+
+		syslog(LOG_INFO,
+		       "HOST_SSHANDLER [hapd-crash]: collecting pid=%ld signal=%d executable=%s",
+		       (long)info.pid, info.signal, info.executable);
+		subsys_action_hostapd_crash_snapshot(&info);
+	}
+
+	return NULL;
 }
 
 /* Validate iface: [a-zA-Z0-9._-] only. */
@@ -476,6 +634,26 @@ void *subsys_hapd_listener_thread(void *arg)
 				continue;
 			msg[n] = '\0';
 
+			{
+				char crash_msg[HAPD_SSH_MSG_MAX];
+				struct hapd_crash_info crash_info;
+				int crash_ret;
+
+				strlcpy(crash_msg, msg, sizeof(crash_msg));
+				crash_ret = parse_hostapd_crash_event(crash_msg,
+								      &crash_info);
+				if (crash_ret < 0) {
+					syslog(LOG_ERR,
+					       "HOST_SSHANDLER [hapd-crash]: malformed: [%s]",
+					       msg);
+					continue;
+				}
+				if (crash_ret > 0) {
+					queue_hostapd_crash(&crash_info);
+					continue;
+				}
+			}
+
 			event_str[0] = addr[0] = iface[0] = '\0';
 			{
 				/* Work on a copy so the error log can print the original. */
@@ -544,6 +722,14 @@ void host_start_hapd_listener_thread(struct subsys_ctx *ctx)
 	int ret;
 
 	ctx->hapd_log_ctx.trigger_mask = ctx->cfg.hapd_log_trigger_mask;
+	ret = pthread_create(&hapd_crash_worker_thread, NULL,
+			     hapd_crash_worker, NULL);
+	if (ret != 0) {
+		fprintf(stderr,
+			"HOST_SSHANDLER [hapd-crash]: failed to start worker: %s (%d)\n",
+			strerror(ret), ret);
+	}
+
 	ret = pthread_create(&hapd_listener_thread, NULL,
 			     subsys_hapd_listener_thread, ctx);
 	if (ret != 0) {

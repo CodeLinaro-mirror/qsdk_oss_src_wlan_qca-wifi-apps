@@ -12,6 +12,9 @@
 #include <stdbool.h>
 #include <dirent.h>
 #include <pthread.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include "subsys_core.h"
 #include "da_interface.h"
 #include "hapd_log_listener.h"
@@ -32,9 +35,12 @@
 #define ATH12K_MINIDUMP_DIR_NAME "minidump"
 #define ATH12K_MINIDUMP_COLLECT "collect"
 #define TEMP_DIR "/tmp"
+#define LOGREAD_CMD  "logread"
 #define SYSLOG_NG_CMD  "cat /var/log/messages"
 #define MINIDUMP_DIR    TEMP_DIR "/minidump"
 #define ATH12K_SNAPSHOT_FILE  "snapshot"
+#define HOSTAPD_CORE_WAIT_MS 30000
+#define HOSTAPD_CORE_POLL_MS 100
 
 static int ath12k_get_dbgmask_path(char *path_buf, size_t buf_size)
 {
@@ -508,10 +514,12 @@ static bool ath12k_snapshot_is_enabled(void)
 }
 
 
-static bool subsys_snap_collect_minidump(void)
+static bool subsys_snap_collect_minidump(
+		const struct hapd_crash_info *crash_info)
 {
 	char cmd[MAX_CMD_LEN];
 	struct timespec ts = { .tv_sec = 1, .tv_nsec = 500000000 };
+	(void)crash_info;
 
 	if(!trigger_minidump())
 		return false;
@@ -526,34 +534,215 @@ static bool subsys_snap_collect_minidump(void)
 	return true;
 }
 
-static bool subsys_snap_collect_syslog(void)
+static bool subsys_snap_collect_syslog(
+		const struct hapd_crash_info *crash_info)
 {
 	char cmd[MAX_CMD_LEN];
+	(void)crash_info;
 
-	snprintf(cmd, sizeof(cmd), "%s > %s/syslog.txt 2>&1", SYSLOG_NG_CMD, HOST_DEBUG_DIR);
+	snprintf(cmd, sizeof(cmd), "%s > %s/syslog.txt 2>&1", LOGREAD_CMD,
+		  HOST_DEBUG_DIR);
 	if (system(cmd) != 0) {
-		fprintf(stderr, "HOST_SSHANDLER: syslog-ng log collection failed\n");
-		return false;
+		/* syslog-ng provides logread as a wrapper on some images, while
+		 * others retain the log file directly.  Preserve the existing
+		 * fallback so snapshot collection remains portable. */
+		snprintf(cmd, sizeof(cmd), "%s > %s/syslog.txt 2>&1",
+			  SYSLOG_NG_CMD, HOST_DEBUG_DIR);
+		if (system(cmd) != 0) {
+			fprintf(stderr,
+				"HOST_SSHANDLER: logread/syslog collection failed\n");
+			return false;
+		}
 	}
 
 	return true;
 }
+
+static bool hostapd_core_name_matches(const char *name,
+					      const struct hapd_crash_info *info)
+{
+	char suffix[48];
+	int len;
+
+	if (!name || !info || info->pid <= 0 || info->signal <= 0)
+		return false;
+
+	len = snprintf(suffix, sizeof(suffix), ".%ld.%d.core",
+		       (long)info->pid, info->signal);
+	if (len < 0 || (size_t)len >= sizeof(suffix))
+		return false;
+
+	if (strlen(name) < (size_t)len)
+		return false;
+
+	return strcmp(name + strlen(name) - len, suffix) == 0;
+}
+
+static int find_hostapd_core(const struct hapd_crash_info *info,
+				     char *path, size_t path_size)
+{
+	DIR *dir;
+	struct dirent *entry;
+
+	if (!info || !path || path_size == 0)
+		return -EINVAL;
+
+	dir = opendir(TEMP_DIR);
+	if (!dir)
+		return -errno;
+
+	while ((entry = readdir(dir)) != NULL) {
+		struct stat st;
+		int ret;
+
+		if (!hostapd_core_name_matches(entry->d_name, info))
+			continue;
+
+		ret = snprintf(path, path_size, "%s/%s", TEMP_DIR,
+			       entry->d_name);
+		if (ret < 0 || (size_t)ret >= path_size)
+			continue;
+
+		if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+			closedir(dir);
+			return 0;
+		}
+	}
+
+	closedir(dir);
+	return -ENOENT;
+}
+
+static int wait_for_hostapd_core(const struct hapd_crash_info *info,
+					char *path, size_t path_size)
+{
+	int elapsed_ms = 0;
+
+	while (elapsed_ms < HOSTAPD_CORE_WAIT_MS) {
+		struct stat first, second;
+		struct timespec poll_ts = {
+			.tv_sec = 0,
+			.tv_nsec = HOSTAPD_CORE_POLL_MS * 1000000L,
+		};
+
+		if (find_hostapd_core(info, path, path_size) == 0 &&
+		    stat(path, &first) == 0) {
+			nanosleep(&poll_ts, NULL);
+
+			if (stat(path, &second) == 0 &&
+			    first.st_size == second.st_size &&
+			    second.st_size > 0)
+				return 0;
+		}
+
+		nanosleep(&poll_ts, NULL);
+		elapsed_ms += HOSTAPD_CORE_POLL_MS * 2;
+	}
+
+	return -ETIMEDOUT;
+}
+
+static bool copy_hostapd_core(const struct hapd_crash_info *info)
+{
+	char source[MAX_PATH_LEN];
+	char destination[MAX_PATH_LEN];
+	char buf[8192];
+	int in_fd = -1;
+	int out_fd = -1;
+	ssize_t read_size;
+	bool success = false;
+
+	if (wait_for_hostapd_core(info, source, sizeof(source)) < 0) {
+		fprintf(stderr,
+			"HOST_SSHANDLER: hostapd core not found for pid=%ld signal=%d\n",
+			(long)info->pid, info->signal);
+		return false;
+	}
+
+	if (snprintf(destination, sizeof(destination), "%s/hostapd.core",
+		     HOST_DEBUG_DIR) >= (int)sizeof(destination))
+		return false;
+
+	in_fd = open(source, O_RDONLY | O_CLOEXEC);
+	if (in_fd < 0) {
+		fprintf(stderr, "HOST_SSHANDLER: failed to open hostapd core %s: %s\n",
+			source, strerror(errno));
+		return false;
+	}
+
+	out_fd = open(destination, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+		      0600);
+	if (out_fd < 0) {
+		fprintf(stderr,
+			"HOST_SSHANDLER: failed to stage hostapd core %s: %s\n",
+			destination, strerror(errno));
+		close(in_fd);
+		return false;
+	}
+
+	while ((read_size = read(in_fd, buf, sizeof(buf))) > 0) {
+		ssize_t written = 0;
+
+		while (written < read_size) {
+			ssize_t ret = write(out_fd, buf + written,
+					    (size_t)(read_size - written));
+
+			if (ret < 0 && errno == EINTR)
+				continue;
+			if (ret <= 0) {
+				fprintf(stderr,
+					"HOST_SSHANDLER: failed to copy hostapd core: %s\n",
+					strerror(errno));
+				goto out;
+			}
+			written += ret;
+		}
+	}
+
+	if (read_size < 0) {
+		fprintf(stderr, "HOST_SSHANDLER: failed to read hostapd core: %s\n",
+			strerror(errno));
+		goto out;
+	}
+
+	success = true;
+
+out:
+	close(out_fd);
+	close(in_fd);
+	return success;
+}
+
+static bool subsys_snap_collect_hostapd_core(
+		const struct hapd_crash_info *crash_info)
+{
+	if (!crash_info)
+		return false;
+
+	return copy_hostapd_core(crash_info);
+}
+
 struct snap_subcategory {
 	const char *key;
-	bool (*collect)(void);
+	bool (*collect)(const struct hapd_crash_info *crash_info);
 };
 
 static const struct snap_subcategory snap_subcategory_map[] = {
 	{ SS_SNAP_KEY_MINIDUMP, subsys_snap_collect_minidump },
-	{ SS_SNAP_KEY_SYSLOG,  subsys_snap_collect_syslog  },
+	{ SS_SNAP_KEY_SYSLOG, subsys_snap_collect_syslog },
+	{ SS_SNAP_KEY_HAPD_CORE, subsys_snap_collect_hostapd_core },
 };
 
-static void create_host_snapshot(const char *event_name, char * const *snap_context)
+static pthread_mutex_t host_snapshot_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void create_host_snapshot(const char *event_name,
+				 char * const *snap_context,
+				 const struct hapd_crash_info *crash_info)
 {
 	char cmd[MAX_CMD_LEN];
 	int i, j, collected = 0;
 
-	if (!ath12k_snapshot_is_enabled()) {
+	if (!crash_info && !ath12k_snapshot_is_enabled()) {
 		fprintf(stdout, "HOST_SSHANDLER: snapshot not enabled, skipping\n");
 		return;
 	}
@@ -563,15 +752,21 @@ static void create_host_snapshot(const char *event_name, char * const *snap_cont
 		return;
 	}
 
+	pthread_mutex_lock(&host_snapshot_lock);
+
 	snprintf(cmd, sizeof(cmd), "mkdir -p %s", HOST_DEBUG_DIR);
-	system(cmd);
+	if (system(cmd) != 0) {
+		fprintf(stderr,
+			"HOST_SSHANDLER: failed to create snapshot staging directory\n");
+		goto cleanup_unlock;
+	}
 
 	for (i = 0; i < SSH_MAX_CTX_STRINGS && snap_context[i]; i++) {
 		bool matched = false;
 
 		for (j = 0; j < ARRAY_SIZE(snap_subcategory_map); j++) {
 			if (strcmp(snap_context[i], snap_subcategory_map[j].key) == 0) {
-				if (snap_subcategory_map[j].collect())
+				if (snap_subcategory_map[j].collect(crash_info))
 					collected++;
 				matched = true;
 				break;
@@ -602,6 +797,9 @@ static void create_host_snapshot(const char *event_name, char * const *snap_cont
 cleanup:
 	snprintf(cmd, sizeof(cmd), "rm -rf %s", HOST_DEBUG_DIR);
 	system(cmd);
+
+cleanup_unlock:
+	pthread_mutex_unlock(&host_snapshot_lock);
 }
 
 void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
@@ -616,7 +814,8 @@ void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
 		enable_hapd_verbose_logs(radio_id);
 		break;
 	case SS_ACTION_SNAPSHOT:
-		create_host_snapshot(ath12k_crit_type_str(trigger), action_context);
+		create_host_snapshot(ath12k_crit_type_str(trigger), action_context,
+				     NULL);
 		break;
 	case SS_ACTION_ENABLE_DBG_LOGS_ON_BOOT:
 		subsys_action_set_boot_dbgmask(action_context);
@@ -650,11 +849,23 @@ void subsys_action_stop(enum subsys_action_id act_id, uint16_t radio_id, char * 
 		break;
 	case SS_ACTION_SNAPSHOT:
 		if (radio_id != USHRT_MAX)
-			create_host_snapshot(ath12k_crit_type_str(trigger), action_context);
+			create_host_snapshot(ath12k_crit_type_str(trigger), action_context,
+					     NULL);
 		break;
 	default:
 		break;
 	}
+}
+
+void subsys_action_hostapd_crash_snapshot(const struct hapd_crash_info *info)
+{
+	char *snapshot_context[] = {
+		SS_SNAP_KEY_HAPD_CORE,
+		SS_SNAP_KEY_SYSLOG,
+		NULL,
+	};
+
+	create_host_snapshot(HAPD_CRASH_EVENT, snapshot_context, info);
 }
 
 static pthread_t host_window_thread;
