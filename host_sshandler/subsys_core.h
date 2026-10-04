@@ -11,12 +11,18 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <signal.h>
+#include <time.h>
 #include "hapd_log_listener.h"
+#include "ad_anomaly_handler.h"
 
 #define SSH_MAX_ACTIONS_PER_ENUM 4
 #define SSH_MAX_CTX_STRINGS 8
 #define SS_SNAP_KEY_MINIDUMP  "minidump"
 #define SS_SNAP_KEY_SYSLOG    "syslog"
+
+#define HOST_DEBUG_DIR           "/tmp/host_debug_logs"
+#define HOST_MASTER_ANOMALY_LOG  HOST_DEBUG_DIR "/host_anomaly_master.log"
+
 extern volatile sig_atomic_t t_stop_flag;
 
 enum subsys_action_id {
@@ -41,6 +47,8 @@ enum ath12k_crit_err_type {
 	ATH12K_BDF_LOAD_FAILURE = 4,
 	ATH12K_CRIT_MVR_FAILURE = 5,
 	ATH12K_CRIT_SCAN_FAILURE = 6,
+	ATH12K_CRIT_AD_FAIL_CONNECT = 7,
+	ATH12K_CRIT_AD_DISCONNECT = 8,
 	ATH12K_CRIT_MAX
 };
 
@@ -90,6 +98,8 @@ struct subsys_ctx {
 	struct hapd_listener_ctx hapd_log_ctx;
 	bool hapd_log_active;
 	uint64_t hapd_log_window_end_ns;
+	host_anomaly_tracker anomaly_trackers[HOST_MAX_ANOMALY_TRACKERS];
+	int anomaly_tracker_count;
 };
 
 const char *ath12k_crit_type_str(enum ath12k_crit_err_type t);

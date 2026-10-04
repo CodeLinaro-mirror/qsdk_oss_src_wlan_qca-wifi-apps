@@ -12,6 +12,7 @@
 #include "da_interface.h"
 #include "subsys_core.h"
 #include <signal.h>
+#include "ad_anomaly_handler.h"
 
 static struct subsys_ctx host_ctx;
 void lib_init(TelemetryServiceAPPCallbacks *callbacks);
@@ -47,21 +48,40 @@ void da_interface_host_create_snapshot(const char *event_name)
 void handle_subsystem_notification(subsystem_notification_msg *notification)
 {
 	char cmd[MAX_CMD_LEN];
+	const char *content;
+	size_t content_len;
 
 	if (!notification)
 		return;
 
-	if (notification->msg_type != SUBSYSTEM_NOTIFICATION_SNAPSHOT_COMPLETE)
-		return;
+	switch (notification->msg_type) {
+		case SUBSYSTEM_NOTIFICATION_SNAPSHOT_COMPLETE:
+			fprintf(stdout,
+				"HOST_SSHANDLER: snapshot complete, removing staging file %s\n",
+				HOST_LOGS_FILE_PATH);
+			snprintf(cmd, sizeof(cmd), "rm -f %s", HOST_LOGS_FILE_PATH);
+			if (system(cmd) != 0)
+				fprintf(stderr,
+					"HOST_SSHANDLER: failed to remove staging file %s\n",
+					HOST_LOGS_FILE_PATH);
+			break;
 
-	fprintf(stdout, "HOST_SSHANDLER: snapshot complete, removing staging file %s\n",
-			HOST_LOGS_FILE_PATH);
+		case SUBSYSTEM_NOTIFICATION_EVENT_OCCURRED:
+			content = notification->payload.event_occurred.msg_content;
+			content_len  = notification->payload.event_occurred.content_len;
+			if (!content) {
+				fprintf(stdout,
+					"HOST_SSHANDLER: Notification content is NULL\n");
+				return;
+			}
+			ad_host_anomaly_handle_notification(&host_ctx, content, content_len);
+			break;
 
-	snprintf(cmd, sizeof(cmd), "rm -f %s", HOST_LOGS_FILE_PATH);
-	if (system(cmd) != 0)
-		fprintf(stderr,
-			"HOST_SSHANDLER: failed to remove staging file %s\n",
-			HOST_LOGS_FILE_PATH);
+		default:
+			fprintf(stdout, "Unhandled msg_type=%d\n",
+					notification->msg_type);
+			break;
+	}
 }
 
 /* service_interrupt_from_telemetry_uio_driver :

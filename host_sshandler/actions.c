@@ -34,7 +34,6 @@
 #define TEMP_DIR "/tmp"
 #define SYSLOG_NG_CMD  "cat /var/log/messages"
 #define MINIDUMP_DIR    TEMP_DIR "/minidump"
-#define HOST_DEBUG_DIR  TEMP_DIR "/host_debug_logs"
 #define ATH12K_SNAPSHOT_FILE  "snapshot"
 
 static int ath12k_get_dbgmask_path(char *path_buf, size_t buf_size)
@@ -683,4 +682,3 @@ void host_start_window_thread(struct subsys_ctx *ctx)
 		fprintf(stderr, "HOST_SSHANDLER: failed to start window thread\n");
 	}
 }
-
