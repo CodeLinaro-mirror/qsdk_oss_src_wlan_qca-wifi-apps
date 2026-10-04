@@ -561,21 +561,40 @@ static bool subsys_snap_collect_syslog(
 static bool hostapd_core_name_matches(const char *name,
 					      const struct hapd_crash_info *info)
 {
-	char suffix[48];
+	char pid_token[48];
+	char executable_prefix[HAPD_CRASH_EXE_LEN + 2];
+	const char *core_suffix = ".core";
+	size_t name_len;
 	int len;
 
-	if (!name || !info || info->pid <= 0 || info->signal <= 0)
+	if (!name || !info || info->pid <= 0 || !info->executable[0])
 		return false;
 
-	len = snprintf(suffix, sizeof(suffix), ".%ld.%d.core",
-		       (long)info->pid, info->signal);
-	if (len < 0 || (size_t)len >= sizeof(suffix))
+	len = snprintf(executable_prefix, sizeof(executable_prefix), "%s.",
+		       info->executable);
+	if (len < 0 || (size_t)len >= sizeof(executable_prefix))
 		return false;
 
-	if (strlen(name) < (size_t)len)
+	if (strncmp(name, executable_prefix, (size_t)len) != 0)
 		return false;
 
-	return strcmp(name + strlen(name) - len, suffix) == 0;
+	len = snprintf(pid_token, sizeof(pid_token), ".%ld.",
+		       (long)info->pid);
+	if (len < 0 || (size_t)len >= sizeof(pid_token))
+		return false;
+
+	/* The deployed image uses <exe>.<pid>.<timestamp>.core, while
+	 * other images may use <exe>.<timestamp>.<pid>.<signal>.core.
+	 * Matching the dot-delimited PID keeps both formats supported without
+	 * depending on timestamp or signal fields in the filename. */
+	if (!strstr(name, pid_token))
+		return false;
+
+	name_len = strlen(name);
+	if (name_len <= strlen(core_suffix))
+		return false;
+
+	return strcmp(name + name_len - strlen(core_suffix), core_suffix) == 0;
 }
 
 static int find_hostapd_core(const struct hapd_crash_info *info,
@@ -583,6 +602,9 @@ static int find_hostapd_core(const struct hapd_crash_info *info,
 {
 	DIR *dir;
 	struct dirent *entry;
+	char selected_path[MAX_PATH_LEN];
+	struct stat selected_st;
+	bool found = false;
 
 	if (!info || !path || path_size == 0)
 		return -EINVAL;
@@ -592,25 +614,39 @@ static int find_hostapd_core(const struct hapd_crash_info *info,
 		return -errno;
 
 	while ((entry = readdir(dir)) != NULL) {
+		char candidate_path[MAX_PATH_LEN];
 		struct stat st;
 		int ret;
 
 		if (!hostapd_core_name_matches(entry->d_name, info))
 			continue;
 
-		ret = snprintf(path, path_size, "%s/%s", TEMP_DIR,
+		ret = snprintf(candidate_path, sizeof(candidate_path), "%s/%s", TEMP_DIR,
 			       entry->d_name);
-		if (ret < 0 || (size_t)ret >= path_size)
+		if (ret < 0 || (size_t)ret >= sizeof(candidate_path))
 			continue;
 
-		if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
-			closedir(dir);
-			return 0;
+		if (stat(candidate_path, &st) == 0 && S_ISREG(st.st_mode) &&
+		    (!found || st.st_mtime > selected_st.st_mtime)) {
+			ret = snprintf(selected_path, sizeof(selected_path), "%s",
+				       candidate_path);
+			if (ret < 0 || (size_t)ret >= sizeof(selected_path))
+				continue;
+
+			selected_st = st;
+			found = true;
 		}
 	}
 
 	closedir(dir);
-	return -ENOENT;
+	if (!found)
+		return -ENOENT;
+
+	if (snprintf(path, path_size, "%s", selected_path) < 0 ||
+	    strlen(selected_path) >= path_size)
+		return -ENAMETOOLONG;
+
+	return 0;
 }
 
 static int wait_for_hostapd_core(const struct hapd_crash_info *info,
