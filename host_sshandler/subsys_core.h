@@ -120,5 +120,7 @@ void *subsys_critical_buffer_monitor_thread(void *arg);
 
 void host_subsys_init_ctx(struct subsys_ctx *ctx);
 void host_start_window_thread(struct subsys_ctx *ctx);
+void subsys_action_hostapd_connectivity_snapshot(const char *event_name,
+							  char * const *action_context);
 
 #endif /* SUBSYS_CORE_H */

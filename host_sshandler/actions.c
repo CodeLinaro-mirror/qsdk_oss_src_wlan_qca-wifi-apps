@@ -838,6 +838,12 @@ cleanup_unlock:
 	pthread_mutex_unlock(&host_snapshot_lock);
 }
 
+void subsys_action_hostapd_connectivity_snapshot(const char *event_name,
+							  char * const *action_context)
+{
+	create_host_snapshot(event_name, action_context, NULL);
+}
+
 void subsys_action_start(enum subsys_action_id act_id, uint16_t radio_id,
 			 char * const *action_context,
 			 enum ath12k_crit_err_type trigger)

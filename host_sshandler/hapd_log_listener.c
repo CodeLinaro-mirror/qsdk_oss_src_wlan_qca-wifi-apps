@@ -438,6 +438,14 @@ static const struct hapd_event_cmd eapol_fail_cmds[] = {
 	{ NULL }
 };
 
+static const struct hapd_event_cmd connectivity_fail_cmds[] = {
+	{ "LOG_LEVEL ieee80211 debug_verbose", MOD_IEEE80211, false },
+	{ "LOG_LEVEL driver debug_verbose",    MOD_DRIVER,    false },
+	{ "LOG_PEER",                          0,             true  },
+	{ "STATUS",                            0,             false },
+	{ NULL }
+};
+
 /*
  * vap_create_fail / vap_up_fail: BSS-level events (NULL addr).
  * Enable driver module verbose logging and dump STATUS for the BSS.
@@ -458,6 +466,13 @@ static const struct hapd_event_action event_action_table[] = {
 	{ "auth_reject",      auth_reject_cmds      },
 	{ "assoc_reject",     assoc_reject_cmds     },
 	{ "4way_fail",        eapol_fail_cmds       },
+	{ "auth_tx_fail",     connectivity_fail_cmds },
+	{ "assoc_resp_tx_fail", connectivity_fail_cmds },
+	{ "reassoc_resp_tx_fail", connectivity_fail_cmds },
+	{ "probe_resp_tx_fail", connectivity_fail_cmds },
+	{ "deauth_tx_fail",   connectivity_fail_cmds },
+	{ "disassoc_tx_fail", connectivity_fail_cmds },
+	{ "action_tx_fail",   connectivity_fail_cmds },
 	{ "vap_create_fail",  vap_create_fail_cmds  },
 	{ "vap_up_fail",      vap_up_fail_cmds      },
 	{ NULL }
@@ -482,6 +497,13 @@ static uint32_t event_type_to_bit(const char *ev)
 	if (!strcmp(ev, "4way_fail"))             return HAPD_TRIG_EAPOL_FAIL;
 	if (!strcmp(ev, "vap_create_fail"))       return HAPD_TRIG_VAP_CREATE_FAIL;
 	if (!strcmp(ev, "vap_up_fail"))           return HAPD_TRIG_VAP_UP_FAIL;
+	if (!strcmp(ev, "auth_tx_fail"))          return HAPD_TRIG_AUTH_TX_FAIL;
+	if (!strcmp(ev, "assoc_resp_tx_fail"))    return HAPD_TRIG_ASSOC_RESP_TX_FAIL;
+	if (!strcmp(ev, "reassoc_resp_tx_fail"))  return HAPD_TRIG_REASSOC_RESP_TX_FAIL;
+	if (!strcmp(ev, "probe_resp_tx_fail"))    return HAPD_TRIG_PROBE_RESP_TX_FAIL;
+	if (!strcmp(ev, "deauth_tx_fail"))        return HAPD_TRIG_DEAUTH_TX_FAIL;
+	if (!strcmp(ev, "disassoc_tx_fail"))      return HAPD_TRIG_DISASSOC_TX_FAIL;
+	if (!strcmp(ev, "action_tx_fail"))        return HAPD_TRIG_ACTION_TX_FAIL;
 	return 0;
 }
 
@@ -492,6 +514,25 @@ static bool event_triggers_snapshot(const char *event)
 	       !strcmp(event, "4way_fail") ||
 	       !strcmp(event, "vap_create_fail") ||
 	       !strcmp(event, "vap_up_fail");
+}
+
+static const char *event_cloud_name(const char *event)
+{
+	if (!strcmp(event, "auth_tx_fail"))
+		return "host_auth_tx_fail";
+	if (!strcmp(event, "assoc_resp_tx_fail"))
+		return "host_assoc_resp_tx_fail";
+	if (!strcmp(event, "reassoc_resp_tx_fail"))
+		return "host_reassoc_resp_tx_fail";
+	if (!strcmp(event, "probe_resp_tx_fail"))
+		return "host_probe_resp_tx_fail";
+	if (!strcmp(event, "deauth_tx_fail"))
+		return "host_deauth_tx_fail";
+	if (!strcmp(event, "disassoc_tx_fail"))
+		return "host_disassoc_tx_fail";
+	if (!strcmp(event, "action_tx_fail"))
+		return "host_action_tx_fail";
+	return NULL;
 }
 
 static enum ath12k_crit_err_type event_snapshot_trigger(const char *event)
@@ -690,15 +731,20 @@ void *subsys_hapd_listener_thread(void *arg)
 			uint32_t mod_mask = dispatch_event_cmds(act, iface, addr);
 			peer_log_add(iface, addr, mod_mask);
 
-			if (event_triggers_snapshot(event_str)) {
+			const char *cloud_name = event_cloud_name(event_str);
+			if (event_triggers_snapshot(event_str) || cloud_name) {
 				char *snapshot_context[] = {
 					SS_SNAP_KEY_SYSLOG,
 					NULL
 				};
 
-				subsys_action_start(SS_ACTION_SNAPSHOT, 0,
-						    snapshot_context,
-						    event_snapshot_trigger(event_str));
+				if (cloud_name)
+					subsys_action_hostapd_connectivity_snapshot(
+							cloud_name, snapshot_context);
+				else
+					subsys_action_start(SS_ACTION_SNAPSHOT, 0,
+							    snapshot_context,
+							    event_snapshot_trigger(event_str));
 			}
 		}
 

@@ -59,6 +59,13 @@ struct hapd_crash_info {
 #define HAPD_TRIG_EAPOL_FAIL       (1U << 2)
 #define HAPD_TRIG_VAP_CREATE_FAIL  (1U << 3)
 #define HAPD_TRIG_VAP_UP_FAIL      (1U << 4)
+#define HAPD_TRIG_AUTH_TX_FAIL     (1U << 5)
+#define HAPD_TRIG_ASSOC_RESP_TX_FAIL (1U << 6)
+#define HAPD_TRIG_REASSOC_RESP_TX_FAIL (1U << 7)
+#define HAPD_TRIG_PROBE_RESP_TX_FAIL (1U << 8)
+#define HAPD_TRIG_DEAUTH_TX_FAIL   (1U << 9)
+#define HAPD_TRIG_DISASSOC_TX_FAIL (1U << 10)
+#define HAPD_TRIG_ACTION_TX_FAIL   (1U << 11)
 #define HAPD_TRIG_ALL              0U
 
 struct hapd_listener_ctx {
